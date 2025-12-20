@@ -5,7 +5,8 @@ from scipy.stats import poisson
 
 st.set_page_config(page_title="iTrOz Predictor Elite", layout="wide")
 
-API_KEY = "f30f164b1e1b47cfb7ede5d459f5ab54"
+# --- NOUVELLE CLE API ---
+API_KEY = "f088c65ff3ea4ca9b6a29fe1c2429faf"
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
 
@@ -18,12 +19,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=3600)
-def fetch_api(endpoint, params):
+@st.cache_data(ttl=86400)
+def get_teams(league_id):
     try:
-        res = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
-        return res.json().get('response', [])
-    except: return []
+        res = requests.get(f"{BASE_URL}teams", headers=HEADERS, params={"league": league_id, "season": 2024}, timeout=5)
+        data = res.json().get('response', [])
+        if not data: return {}
+        return {t['team']['name']: t['team']['id'] for t in data}
+    except: return {}
+
+@st.cache_data(ttl=3600)
+def get_stats(league_id, team_id):
+    try:
+        res = requests.get(f"{BASE_URL}teams/statistics", headers=HEADERS, params={"league": league_id, "season": 2024, "team": team_id}, timeout=5)
+        return res.json().get('response', {})
+    except: return {}
 
 def rho_correction(x, y, lh, la, rho):
     if x == 0 and y == 0: return 1 - (lh * la * rho)
@@ -45,38 +55,26 @@ leagues_cfg = {
 col1, col2 = st.columns(2)
 
 with col1:
-    l_h_name = st.selectbox("League Home", list(leagues_cfg.keys()))
-    teams_h_raw = fetch_api("teams", {"league": leagues_cfg[l_h_name]["id"], "season": 2024})
-    if teams_h_raw:
-        team_list_h = {t['team']['name']: t['team']['id'] for t in teams_h_raw}
-        t_h_name = st.selectbox("Team Home", list(team_list_h.keys()))
-        t_h_id = team_list_h.get(t_h_name)
-    else:
-        st.warning("Chargement des équipes domicile...")
-        t_h_id = None
+    l_h_name = st.selectbox("League Home", list(leagues_cfg.keys()), key="l_h")
+    team_list_h = get_teams(leagues_cfg[l_h_name]["id"])
+    t_h_name = st.selectbox("Team Home", list(team_list_h.keys()) if team_list_h else ["Indisponible"], key="t_h")
+    t_h_id = team_list_h.get(t_h_name)
 
 with col2:
-    l_a_name = st.selectbox("League Away", list(leagues_cfg.keys()))
-    teams_a_raw = fetch_api("teams", {"league": leagues_cfg[l_a_name]["id"], "season": 2024})
-    if teams_a_raw:
-        team_list_a = {t['team']['name']: t['team']['id'] for t in teams_a_raw}
-        t_a_name = st.selectbox("Team Away", list(team_list_a.keys()))
-        t_a_id = team_list_a.get(t_a_name)
-    else:
-        st.warning("Chargement des équipes extérieur...")
-        t_a_id = None
+    l_a_name = st.selectbox("League Away", list(leagues_cfg.keys()), key="l_a")
+    team_list_a = get_teams(leagues_cfg[l_a_name]["id"])
+    t_a_name = st.selectbox("Team Away", list(team_list_a.keys()) if team_list_a else ["Indisponible"], key="t_a")
+    t_a_id = team_list_a.get(t_a_name)
 
-rho_val = st.sidebar.slider("Ajustement Rho (Dixon-Coles)", -0.20, 0.20, -0.06)
+rho_val = st.sidebar.slider("Ajustement Rho", -0.20, 0.20, -0.06)
 
 if st.button("LANCER L'ALGORITHME PREDICTIF"):
     if t_h_id and t_a_id:
-        with st.spinner('Analyse statistique profonde...'):
-            s_h_res = fetch_api("teams/statistics", {"league": leagues_cfg[l_h_name]["id"], "season": 2024, "team": t_h_id})
-            s_a_res = fetch_api("teams/statistics", {"league": leagues_cfg[l_a_name]["id"], "season": 2024, "team": t_a_id})
+        with st.spinner('Calcul en cours...'):
+            s_h = get_stats(leagues_cfg[l_h_name]["id"], t_h_id)
+            s_a = get_stats(leagues_cfg[l_a_name]["id"], t_a_id)
             
-            if s_h_res and s_a_res:
-                s_h, s_a = s_h_res, s_a_res
-                
+            if s_h and s_a:
                 cs_h = (s_h.get('clean_sheet', {}).get('home', 0) / max(s_h.get('fixtures', {}).get('played', {}).get('home', 1), 1))
                 cs_a = (s_a.get('clean_sheet', {}).get('away', 0) / max(s_a.get('fixtures', {}).get('played', {}).get('away', 1), 1))
                 
@@ -109,6 +107,6 @@ if st.button("LANCER L'ALGORITHME PREDICTIF"):
                     h, a = np.unravel_index(idx, matrix.shape)
                     st.write(f"Score {h} - {a} : {matrix[h, a]*100:.1f}%")
             else:
-                st.error("Erreur de récupération des statistiques profondes.")
+                st.error("Stats indisponibles. Verifie ton quota API.")
     else:
-        st.error("Sélection incomplète ou API indisponible.")
+        st.error("Selectionne des equipes valides.")
