@@ -1,98 +1,128 @@
 import streamlit as st
 import requests
-import math
 import numpy as np
+from scipy.stats import poisson, entropy
+import plotly.express as px
 
-st.set_page_config(page_title="iTrOz Predictor | Absolute", layout="wide")
+st.set_page_config(page_title="iTrOz Predictor ELITE PRO", layout="wide")
+
+API_KEY = ""
+BASE_URL = "https://v3.football.api-sports.io/"
+HEADERS = {'x-apisports-key': API_KEY}
+SEASON_ACTUELLE = 2025
+SEASON_PRECEDENTE = 2024
 
 st.markdown("""
     <style>
-    .stApp { background: #050505; color: #FFFFFF; }
-    h1, .stMetricValue { color: #FFD700 !important; font-weight: 900 !important; }
-    .stSelectbox label { color: #FFD700 !important; }
-    .side-link {
-        border: 1px solid #FFD700; color: #FFD700 !important;
-        padding: 10px; border-radius: 5px; text-decoration: none; 
-        display: block; text-align: center; margin-bottom: 10px;
-        font-weight: bold;
-    }
-    .side-link:hover { background: #FFD700; color: #000 !important; }
+    .main { background-color: #0A0A0A; color: #E0E0E0; font-family: 'Inter', sans-serif; }
+    .stMetric { background-color: #161616; border: 1px solid #FFD700; padding: 20px; border-radius: 8px; }
+    div[data-testid="stMetricValue"] > div { color: #FFD700 !important; font-size: 32px; font-weight: 700; }
+    .stButton>button { background: #FFD700; color: #000; font-weight: 700; width: 100%; border-radius: 6px; height: 50px; }
+    .factor-card { background: #161616; border-left: 4px solid #FFD700; padding: 15px; margin: 10px 0; border-radius: 4px; }
+    .score-highlight { background: #1A1A1A; padding: 10px; border-radius: 4px; border: 1px solid #333; margin-bottom: 5px; }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-@st.cache_resource
-def get_absolute_data():
-    token = "f30f164b1e1b47cfb7ede5d459f5ab54"
-    headers = {'X-Auth-Token': token}
-    teams = {}
-    for league in ["PD", "PL", "FL1"]:
-        try:
-            r = requests.get(f"https://api.football-data.org/v4/competitions/{league}/standings", headers=headers)
-            rm = requests.get(f"https://api.football-data.org/v4/competitions/{league}/matches?status=FINISHED", headers=headers)
-            matches = rm.json()['matches']
-            for team in r.json()['standings'][0]['table']:
-                t_id = team['team']['id']
-                name = team['team']['name']
-                pts_forme, count = 0, 0
-                for m in reversed(matches):
-                    if count >= 5: break
-                    if m['homeTeam']['id'] == t_id or m['awayTeam']['id'] == t_id:
-                        win = (m['homeTeam']['id'] == t_id and m['score']['winner'] == 'HOME_TEAM') or \
-                              (m['awayTeam']['id'] == t_id and m['score']['winner'] == 'AWAY_TEAM')
-                        draw = m['score']['winner'] == 'DRAW'
-                        pts_forme += 3 if win else 1 if draw else 0
-                        count += 1
-                form_boost = 0.85 + (pts_forme / 15) * 0.30
-                teams[name] = {
-                    'gf': team['goalsFor'], 'ga': team['goalsAgainst'],
-                    'played': team['playedGames'], 'logo': team['team']['crest'],
-                    'form_boost': form_boost
-                }
-        except: continue
-    return teams
+@st.cache_data(ttl=3600)
+def get_api(endpoint, params):
+    try:
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=10)
+        res = r.json().get('response', [])
+        if endpoint == "teams/statistics":
+            return res if isinstance(res, dict) else (res[0] if res else {})
+        return res
+    except: return []
 
-st.title("🏆 iTrOz Predictor")
-data = get_absolute_data()
+def extraire_puissance(stats):
+    if not stats or 'goals' not in stats: return 1.35, 1.35
+    att = float(stats['goals']['for']['average']['total'] or 1.35)
+    defe = float(stats['goals']['against']['average']['total'] or 1.35)
+    return att, defe
 
-if data:
-    t_list = sorted(list(data.keys()))
+st.title("iTrOz Predictor ELITE PRO")
+st.caption("Analyse prédictive de haute précision")
+
+LEAGUES = {"Premier League": 39, "La Liga": 140, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
+nom_ligue = st.selectbox("Championnat", list(LEAGUES.keys()))
+id_ligue = LEAGUES[nom_ligue]
+
+data_equipes = get_api("teams", {"league": id_ligue, "season": SEASON_ACTUELLE})
+equipes = {t['team']['name']: t['team']['id'] for t in data_equipes} if data_equipes else {}
+
+if equipes:
     col_a, col_b = st.columns(2)
-    with col_a:
-        home = st.selectbox("DOMICILE", t_list, index=t_list.index("FC Barcelona") if "FC Barcelona" in t_list else 0)
-        st.image(data[home]['logo'], width=100)
-    with col_b:
-        away = st.selectbox("EXTÉRIEUR", t_list, index=t_list.index("Real Madrid CF") if "Real Madrid CF" in t_list else 1)
-        st.image(data[away]['logo'], width=100)
+    dom_nom = col_a.selectbox("Équipe Domicile", sorted(equipes.keys()))
+    ext_nom = col_b.selectbox("Équipe Extérieur", sorted(equipes.keys()), index=1)
 
-    if st.button("START"):
-        h, a = data[home], data[away]
-        l_h = (h['gf']/h['played']) * (a['ga']/a['played']) * h['form_boost'] * 1.25
-        l_a = (a['gf']/a['played']) * (h['ga']/h['played']) * a['form_boost'] * 0.85
-        p_h, p_a, p_d, total = 0, 0, 0, 0
-        for i in range(10):
-            for j in range(10):
-                prob = ((math.exp(-l_h)*l_h**i)/math.factorial(i)) * \
-                       ((math.exp(-l_a)*l_a**j)/math.factorial(j))
-                total += prob
-                if i > j: p_h += prob
-                elif j > i: p_a += prob
-                else: p_d += prob
-        p_h, p_d, p_a = p_h/total, p_d/total, p_a/total
-        entropy = -sum(p * math.log2(p) for p in [p_h, p_d, p_a] if p > 0)
-        chaos_score = (entropy / 1.58) * 100
-        st.markdown("---")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("VICTOIRE DOM", f"{p_h*100:.1f}%")
-        m2.metric("NUL", f"{p_d*100:.1f}%")
-        m3.metric("VICTOIRE EXT", f"{p_a*100:.1f}%")
-        st.subheader(f"Indice de Chaos : {chaos_score:.1f}%")
-        st.progress(chaos_score/100)
-        if chaos_score > 80: st.error("MATCH IMPRÉVISIBLE")
-        elif chaos_score < 60: st.success("MATCH LISIBLE")
-        else: st.warning("MATCH VOLATIL")
+    if st.button("EXECUTER L'ANALYSE"):
+        with st.spinner("Calcul des probabilités réelles..."):
+            id_dom, id_ext = equipes[dom_nom], equipes[ext_nom]
+            
+            s25_dom = get_api("teams/statistics", {"league": id_ligue, "season": SEASON_ACTUELLE, "team": id_dom})
+            s25_ext = get_api("teams/statistics", {"league": id_ligue, "season": SEASON_ACTUELLE, "team": id_ext})
+            s24_dom = get_api("teams/statistics", {"league": id_ligue, "season": SEASON_PRECEDENTE, "team": id_dom})
+            s24_ext = get_api("teams/statistics", {"league": id_ligue, "season": SEASON_PRECEDENTE, "team": id_ext})
 
-st.sidebar.markdown(f"""
-    <br><br>
-    <a href="https://github.com/clementrnx/" target="_blank" class="side-link">📂 GitHub : clementrnx</a>
-    <a href="https://discord.com/users/itrozola" target="_blank" class="side-link">👾 Discord : itrozola</a>
-    """, unsafe_allow_html=True)
+            att25_dom, def25_dom = extraire_puissance(s25_dom)
+            att25_ext, def25_ext = extraire_puissance(s25_ext)
+            att24_dom, def24_dom = extraire_puissance(s24_dom)
+            att24_ext, def24_ext = extraire_puissance(s24_ext)
+
+            att_final_dom = (att25_dom * 0.7) + (att24_dom * 0.3)
+            def_final_dom = (def25_dom * 0.7) + (def24_dom * 0.3)
+            att_final_ext = (att25_ext * 0.7) + (att24_ext * 0.3)
+            def_final_ext = (def25_ext * 0.7) + (def24_ext * 0.3)
+
+            lh = (att_final_dom * def_final_ext / 1.35) * 1.10
+            la = (att_final_ext * def_final_dom / 1.35)
+
+            matrix = np.zeros((8, 8))
+            for x in range(8):
+                for y in range(8):
+                    matrix[x, y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
+            matrix /= matrix.sum()
+
+            p_dom = np.sum(np.tril(matrix, -1)) * 100
+            p_nul = np.sum(np.diag(matrix)) * 100
+            p_ext = np.sum(np.triu(matrix, 1)) * 100
+
+            st.divider()
+            r1, r2, r3 = st.columns(3)
+            r1.metric(dom_nom, f"{p_dom:.1f}%")
+            r2.metric("MATCH NUL", f"{p_nul:.1f}%")
+            r3.metric(ext_nom, f"{p_ext:.1f}%")
+
+            st.divider()
+            c_gauche, c_droite = st.columns([2, 1])
+
+            with c_gauche:
+                st.subheader("Distribution des Probabilités")
+                fig = px.imshow(matrix, 
+                                labels=dict(x="Extérieur", y="Domicile", color="Probabilité"),
+                                x=[str(i) for i in range(8)], y=[str(i) for i in range(8)],
+                                color_continuous_scale='YlOrRd', text_auto='.1%')
+                st.plotly_chart(fig, use_container_width=True)
+            
+            
+
+            with c_droite:
+                st.subheader("Scores les plus probables")
+                idx_top = np.argsort(matrix.ravel())[-5:][::-1]
+                for i in idx_top:
+                    h, a = np.unravel_index(i, matrix.shape)
+                    st.markdown(f"<div class='score-highlight'><b>{h} - {a}</b> : {matrix[h,a]*100:.1f}%</div>", unsafe_allow_html=True)
+
+                ent = entropy(matrix.ravel())
+                conf = max(0, 100 - (ent * 22))
+                st.subheader("Indice de Fiabilité")
+                st.progress(conf/100)
+                st.write(f"Niveau de certitude : {conf:.1f}%")
+
+            st.divider()
+            st.subheader("Détails des Puissances Calculées")
+            f1, f2, f3 = st.columns(3)
+            f1.metric(f"Attaque {dom_nom}", f"{att_final_dom:.2f}")
+            f2.metric(f"Attaque {ext_nom}", f"{att_final_ext:.2f}")
+            f3.metric("Moyenne Ligue", "1.35")
+else:
+    st.error("Données indisponibles.")
