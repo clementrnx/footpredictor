@@ -30,7 +30,6 @@ def get_absolute_data():
             r = requests.get(f"https://api.football-data.org/v4/competitions/{league}/standings", headers=headers)
             rm = requests.get(f"https://api.football-data.org/v4/competitions/{league}/matches?status=FINISHED", headers=headers)
             matches = rm.json()['matches']
-            
             for team in r.json()['standings'][0]['table']:
                 t_id = team['team']['id']
                 name = team['team']['name']
@@ -43,7 +42,6 @@ def get_absolute_data():
                         draw = m['score']['winner'] == 'DRAW'
                         pts_forme += 3 if win else 1 if draw else 0
                         count += 1
-                
                 form_boost = 0.85 + (pts_forme / 15) * 0.30
                 teams[name] = {
                     'gf': team['goalsFor'], 'ga': team['goalsAgainst'],
@@ -66,11 +64,10 @@ if data:
         away = st.selectbox("EXTÉRIEUR", t_list, index=t_list.index("Real Madrid CF") if "Real Madrid CF" in t_list else 1)
         st.image(data[away]['logo'], width=100)
 
-    if st.button("LANCER L'ARBITRAGE FINAL"):
+    if st.button("START"):
         h, a = data[home], data[away]
         l_h = (h['gf']/h['played']) * (a['ga']/a['played']) * h['form_boost'] * 1.25
         l_a = (a['gf']/a['played']) * (h['ga']/h['played']) * a['form_boost'] * 0.85
-        
         p_h, p_a, p_d, total = 0, 0, 0, 0
         for i in range(10):
             for j in range(10):
@@ -80,33 +77,22 @@ if data:
                 if i > j: p_h += prob
                 elif j > i: p_a += prob
                 else: p_d += prob
-        
         p_h, p_d, p_a = p_h/total, p_d/total, p_a/total
         entropy = -sum(p * math.log2(p) for p in [p_h, p_d, p_a] if p > 0)
         chaos_score = (entropy / 1.58) * 100
-
         st.markdown("---")
         m1, m2, m3 = st.columns(3)
         m1.metric("VICTOIRE DOM", f"{p_h*100:.1f}%")
         m2.metric("NUL", f"{p_d*100:.1f}%")
         m3.metric("VICTOIRE EXT", f"{p_a*100:.1f}%")
-
         st.subheader(f"Indice de Chaos : {chaos_score:.1f}%")
         st.progress(chaos_score/100)
-        
-        if chaos_score > 80:
-            st.error("MATCH IMPRÉVISIBLE")
-        elif chaos_score < 60:
-            st.success("MATCH LISIBLE")
-        else:
-            st.warning("MATCH VOLATIL")
+        if chaos_score > 80: st.error("MATCH IMPRÉVISIBLE")
+        elif chaos_score < 60: st.success("MATCH LISIBLE")
+        else: st.warning("MATCH VOLATIL")
 
 st.sidebar.markdown(f"""
     <br><br>
-    <a href="https://github.com/clementrnx/" target="_blank" class="side-link">
-        📂 GitHub : clementrnx
-    </a>
-    <a href="https://discord.com/users/itrozola" target="_blank" class="side-link">
-        👾 Discord : itrozola
-    </a>
+    <a href="https://github.com/clementrnx/" target="_blank" class="side-link">📂 GitHub : clementrnx</a>
+    <a href="https://discord.com/users/itrozola" target="_blank" class="side-link">👾 Discord : itrozola</a>
     """, unsafe_allow_html=True)
