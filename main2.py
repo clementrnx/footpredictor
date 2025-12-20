@@ -21,8 +21,12 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)
 def fetch_api(endpoint, params):
-    res = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params)
-    return res.json()['response']
+    try:
+        res = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params)
+        data = res.json()
+        return data.get('response', [])
+    except:
+        return []
 
 def rho_correction(x, y, lh, la, rho):
     if x == 0 and y == 0: return 1 - (lh * la * rho)
@@ -39,49 +43,58 @@ col1, col2 = st.columns(2)
 with col1:
     l_h = st.selectbox("League Home", list(leagues.keys()))
     teams_h = fetch_api("teams", {"league": leagues[l_h], "season": 2024})
-    team_list_h = {t['team']['name']: t['team']['id'] for t in teams_h}
+    team_list_h = {t['team']['name']: t['team']['id'] for t in teams_h} if teams_h else {}
     t_h_name = st.selectbox("Team Home", list(team_list_h.keys()))
-    t_h_id = team_list_h[t_h_name]
+    t_h_id = team_list_h.get(t_h_name)
 
 with col2:
     l_a = st.selectbox("League Away", list(leagues.keys()))
     teams_a = fetch_api("teams", {"league": leagues[l_a], "season": 2024})
-    team_list_a = {t['team']['name']: t['team']['id'] for t in teams_a}
+    team_list_a = {t['team']['name']: t['team']['id'] for t in teams_a} if teams_a else {}
     t_a_name = st.selectbox("Team Away", list(team_list_a.keys()))
-    t_a_id = team_list_a[t_a_name]
+    t_a_id = team_list_a.get(t_a_name)
 
 if st.button("CALCULER LA REALITE STATISTIQUE"):
-    s_h_data = fetch_api("teams/statistics", {"league": leagues[l_h], "season": 2024, "team": t_h_id})
-    s_a_data = fetch_api("teams/statistics", {"league": leagues[l_a], "season": 2024, "team": t_a_id})
+    if t_h_id and t_a_id:
+        s_h_res = fetch_api("teams/statistics", {"league": leagues[l_h], "season": 2024, "team": t_h_id})
+        s_a_res = fetch_api("teams/statistics", {"league": leagues[l_a], "season": 2024, "team": t_a_id})
+        
+        if s_h_res and s_a_res:
+            s_h_data = s_h_res
+            s_a_data = s_a_res
 
-    form_h = len([x for x in s_h_data['form'][-5:] if x == 'W']) / 5
-    form_a = len([x for x in s_a_data['form'][-5:] if x == 'W']) / 5
+            form_h = len([x for x in s_h_data.get('form', '')[-5:] if x == 'W']) / 5
+            form_a = len([x for x in s_a_data.get('form', '')[-5:] if x == 'W']) / 5
 
-    att_h = float(s_h_data['goals']['for']['average']['home']) * (1 + form_h * 0.1)
-    def_h = float(s_h_data['goals']['against']['average']['home'])
-    att_a = float(s_a_data['goals']['for']['average']['away']) * (1 + form_a * 0.1)
-    def_a = float(s_a_data['goals']['against']['average']['away'])
+            att_h = float(s_h_data['goals']['for']['average']['home'] or 0) * (1 + form_h * 0.1)
+            def_h = float(s_h_data['goals']['against']['average']['home'] or 1)
+            att_a = float(s_a_data['goals']['for']['average']['away'] or 0) * (1 + form_a * 0.1)
+            def_a = float(s_a_data['goals']['against']['average']['away'] or 1)
 
-    mu_h = att_h * (def_a / 1.5)
-    mu_a = att_a * (def_h / 1.5)
+            mu_h = att_h * (def_a / 1.5)
+            mu_a = att_a * (def_h / 1.5)
 
-    matrix = np.zeros((10, 10))
-    rho = -0.08
-    for x in range(10):
-        for y in range(10):
-            matrix[x,y] = poisson.pmf(x, mu_h) * poisson.pmf(y, mu_a) * rho_correction(x, y, mu_h, mu_a, rho)
-    matrix /= matrix.sum()
+            matrix = np.zeros((10, 10))
+            rho = -0.08
+            for x in range(10):
+                for y in range(10):
+                    matrix[x,y] = poisson.pmf(x, mu_h) * poisson.pmf(y, mu_a) * rho_correction(x, y, mu_h, mu_a, rho)
+            matrix /= matrix.sum()
 
-    p_h, p_d, p_a = np.sum(np.tril(matrix, -1))*100, np.sum(np.diag(matrix))*100, np.sum(np.triu(matrix, 1))*100
+            p_h, p_d, p_a = np.sum(np.tril(matrix, -1))*100, np.sum(np.diag(matrix))*100, np.sum(np.triu(matrix, 1))*100
 
-    st.markdown("---")
-    res1, res2, res3 = st.columns(3)
-    res1.metric(t_h_name, f"{p_h:.1f}%")
-    res2.metric("Nul", f"{p_d:.1f}%")
-    res3.metric(t_a_name, f"{p_a:.1f}%")
+            st.markdown("---")
+            res1, res2, res3 = st.columns(3)
+            res1.metric(t_h_name, f"{p_h:.1f}%")
+            res2.metric("Nul", f"{p_d:.1f}%")
+            res3.metric(t_a_name, f"{p_a:.1f}%")
 
-    st.subheader("Top 3 Scores Probables")
-    flat_indices = np.argsort(matrix.ravel())[-3:][::-1]
-    for idx in flat_indices:
-        h, a = np.unravel_index(idx, matrix.shape)
-        st.write(f"Score {h} - {a} : {matrix[h, a]*100:.1f}%")
+            st.subheader("Top 3 Scores Probables")
+            flat_indices = np.argsort(matrix.ravel())[-3:][::-1]
+            for idx in flat_indices:
+                h, a = np.unravel_index(idx, matrix.shape)
+                st.write(f"Score {h} - {a} : {matrix[h, a]*100:.1f}%")
+        else:
+            st.error("Donnees statistiques indisponibles pour ces equipes.")
+    else:
+        st.error("Selection invalide.")
