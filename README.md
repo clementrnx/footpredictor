@@ -1,6 +1,5 @@
 # footpredictor
-🏆 iTrOz Predictor | Absolute Edition
-iTrOz Predictor est un moteur d'arbitrage statistique conçu pour modéliser les probabilités de résultats des rencontres de football. Contrairement aux approches basées sur l'intuition, cet outil repose exclusivement sur trois piliers mathématiques avancés pour quantifier l'incertitude et la performance.
+t un moteur d'arbitrage statistique conçu pour modéliser les probabilités de résultats des rencontres de football. Contrairement aux approches basées sur l'intuition, cet outil repose exclusivement sur trois piliers mathématiques avancés pour quantifier l'incertitude et la performance.
 
 🧠 Architecture Mathématique
 Le projet utilise des modèles de probabilités discrètes et des théories de l'information pour transformer des données historiques en indicateurs décisionnels.
