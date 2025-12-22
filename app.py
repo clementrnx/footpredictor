@@ -12,19 +12,13 @@ st.markdown("""
         background-size: cover;
         background-attachment: fixed;
     }
-    .stApp > div:first-child {
-        background-color: rgba(0, 0, 0, 0.85);
-    }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.85); }
     
-    h1, h2, h3, p, span, label { 
-        color: #FFD700 !important; 
-        font-family: 'Monospace', sans-serif;
-    }
+    h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
 
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(15px) !important;
-        -webkit-backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.4) !important;
         color: #FFD700 !important;
         border-radius: 10px !important;
@@ -32,39 +26,20 @@ st.markdown("""
         width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
-        letter-spacing: 3px !important;
-        transition: 0.4s;
-        margin-top: 20px;
-        margin-bottom: 20px;
     }
     
-    div.stButton > button:hover {
-        background: rgba(255, 215, 0, 0.2) !important;
-        border: 1px solid #FFD700 !important;
-        box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
-    }
+    div.stButton > button:hover { border: 1px solid #FFD700 !important; box-shadow: 0 0 20px rgba(255, 215, 0, 0.2); }
 
-    div[data-baseweb="select"], div[data-baseweb="input"], input {
-        background: transparent !important;
-        border: none !important;
-    }
-    
+    div[data-baseweb="select"], div[data-baseweb="input"], input { background: transparent !important; border: none !important; }
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        background: transparent !important;
-        border-bottom: 2px solid #FFD700 !important;
-        border-radius: 0px !important;
-    }
-
-    div[data-testid="stMetric"] {
-        background: transparent !important;
-        border: none !important;
+        background: transparent !important; border-bottom: 2px solid #FFD700 !important; border-radius: 0px !important;
     }
 
     .autobet-card {
-        background: rgba(255, 215, 0, 0.05);
-        backdrop-filter: blur(15px);
-        border: 1px dashed #FFD700;
-        padding: 25px;
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(20px);
+        border: 2px solid #FFD700;
+        padding: 30px;
         border-radius: 20px;
         margin-top: 30px;
     }
@@ -114,69 +89,57 @@ if teams:
             lh, la = (att_h * def_a / 1.3) * 1.12, (att_a * def_h / 1.3)
             matrix = np.zeros((7, 7))
             for x in range(7):
-                for y in range(7):
-                    p = poisson.pmf(x, lh) * poisson.pmf(y, la)
-                    matrix[x,y] = p
+                for y in range(7): matrix[x,y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
             matrix /= matrix.sum()
-            st.session_state.data = {
-                'p_h': np.sum(np.tril(matrix, -1)) * 100,
-                'p_n': np.sum(np.diag(matrix)) * 100,
-                'p_a': np.sum(np.triu(matrix, 1)) * 100,
-                'matrix': matrix, 't_h': t_h, 't_a': t_a
-            }
+            st.session_state.data = {'p_h': np.sum(np.tril(matrix, -1)), 'p_n': np.sum(np.diag(matrix)), 'p_a': np.sum(np.triu(matrix, 1)), 'matrix': matrix, 't_h': t_h, 't_a': t_a}
             st.session_state.simulation_done = True
 
 if st.session_state.simulation_done:
     d = st.session_state.data
     st.divider()
-    res1, res2, res3 = st.columns(3)
-    res1.metric(d['t_h'], f"{d['p_h']:.1f}%")
-    res2.metric("NUL", f"{d['p_n']:.1f}%")
-    res3.metric(d['t_a'], f"{d['p_a']:.1f}%")
-
-    st.subheader("AUDIT DU TICKET")
-    a_col1, a_col2, a_col3 = st.columns(3)
-    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
-    cote = a_col2.number_input("COTE", value=1.50, step=0.01)
-    mise_audit = a_col3.number_input("MISE", value=10)
-
-    if st.button("AJUSTER L'AUDIT"): pass
-
-    # --- CATEGORIE AUTOBET ---
-    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
     st.subheader("🤖 MODE AUTOBET")
+    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
     
-    atb1, atb2, atb3, atb4 = st.columns(4)
-    total_bankroll = atb1.number_input("Budget Total (€)", value=100)
-    c_h = atb2.number_input(f"Cote {d['t_h']}", value=2.10, step=0.05)
-    c_n = atb3.number_input("Cote NUL", value=3.20, step=0.05)
-    c_a = atb4.number_input(f"Cote {d['t_a']}", value=3.50, step=0.05)
+    col_bank, col_c1, col_cn, col_c2 = st.columns(4)
+    bankroll = col_bank.number_input("Capital (€)", value=1000)
+    c_h = col_c1.number_input(f"Cote {d['t_h']}", value=2.0)
+    c_n = col_cn.number_input("Cote NUL", value=3.0)
+    c_a = col_c2.number_input(f"Cote {d['t_a']}", value=3.0)
 
-    # Calcul de Kelly Criterion simplifié pour le safe betting
-    probs = [d['p_h']/100, d['p_n']/100, d['p_a']/100]
-    cotes = [c_h, c_n, c_a]
-    names = [d['t_h'], "Nul", d['t_a']]
+    # Calcul des options de paris incluant les Doubles Chances
+    options = [
+        {"name": d['t_h'], "prob": d['p_h'], "cote": c_h},
+        {"name": "Nul", "prob": d['p_n'], "cote": c_n},
+        {"name": d['t_a'], "prob": d['p_a'], "cote": c_a},
+        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": 1 / ( (1/c_h) + (1/c_n) ) * 0.9}, # Approximation safe
+        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": 1 / ( (1/c_n) + (1/c_a) ) * 0.9},
+        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": 1 / ( (1/c_h) + (1/c_a) ) * 0.9}
+    ]
+
+    # Calcul de l'EV et de la mise de Kelly pour chaque option
+    for opt in options:
+        opt['ev'] = (opt['prob'] * opt['cote'])
+        # Formule de Kelly : (bp - q) / b  où b = cote-1, p = proba, q = 1-p
+        b = opt['cote'] - 1
+        if b > 0:
+            k = (b * opt['prob'] - (1 - opt['prob'])) / b
+            opt['kelly'] = max(0, k * 0.15) # On ne mise que 15% de ce que Kelly suggère (Fractional Kelly) pour être ultra safe
+        else: opt['kelly'] = 0
+
+    # Filtrer les Value Bets (EV > 1.0) et prendre le meilleur
+    value_bets = [o for o in options if o['ev'] > 1.02]
     
-    evs = [(probs[i] * cotes[i]) for i in range(3)]
-    best_idx = np.argmax(evs)
-    
-    st.write("### 🎯 Ma recommandation :")
-    if evs[best_idx] > 1.05:
-        # Suggestion Safe : Mise fractionnée sur le meilleur EV
-        suggested_stake = total_bankroll * (probs[best_idx] - (1 - probs[best_idx]) / (cotes[best_idx] - 1)) * 0.2
-        suggested_stake = max(0, min(suggested_stake, total_bankroll * 0.1)) # Cap à 10% pour rester safe
+    if value_bets:
+        best = max(value_bets, key=lambda x: x['ev'])
+        mise_finale = bankroll * best['kelly']
+        # Restriction stricte : Jamais plus de 5% de la bankroll
+        mise_finale = min(mise_finale, bankroll * 0.05)
         
-        st.write(f"Placer **{suggested_stake:.2f}€** sur **{names[best_idx]}**")
-        st.write(f"Raison : Meilleur ratio Probabilité/Gain (EV: {evs[best_idx]:.2f})")
+        st.write(f"### ✅ CONSEIL PRO : PARIER SUR **{best['name'].upper()}**")
+        st.write(f"Mise recommandée : **{mise_finale:.2f}€** (Soit { (mise_finale/bankroll)*100 :.1f}% de ton capital)")
+        st.write(f"Pourquoi ? L'IA estime la probabilité à **{best['prob']*100:.1f}%** contre une cote de **{best['cote']:.2f}** (Value: {best['ev']:.2f})")
     else:
-        st.write("⚠️ **PASSE TON TOUR.** Aucune issue n'offre assez de sécurité par rapport aux cotes.")
+        st.write("### ❌ AUCUN PARI SAFE")
+        st.write("Le risque est trop élevé par rapport aux cotes proposées. Ne parie pas sur ce match.")
 
     st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
-    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
-    s1, s2, s3 = st.columns(3)
-    for i in range(3):
-        with [s1, s2, s3][i]:
-            st.write(f"**TOP {i+1}**")
-            st.write(f"{idx[0][i]} - {idx[1][i]} ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
