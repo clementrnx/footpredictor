@@ -75,6 +75,28 @@ st.markdown("""
         border: 1px solid rgba(255, 215, 0, 0.05);
         margin-bottom: 40px;
     }
+
+    .footer {
+        text-align: center;
+        padding: 50px 0 20px 0;
+        color: rgba(255, 215, 0, 0.6);
+        font-family: 'Monospace', sans-serif;
+        font-size: 14px;
+        letter-spacing: 3px;
+    }
+    .footer a {
+        color: #FFD700 !important;
+        text-decoration: none;
+        font-weight: bold;
+        border: 1px solid rgba(255, 215, 0, 0.2);
+        padding: 8px 15px;
+        border-radius: 5px;
+        transition: 0.3s;
+    }
+    .footer a:hover {
+        background: rgba(255, 215, 0, 0.1);
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -161,17 +183,13 @@ if st.session_state.simulation_done:
         {"n": f"{d['t_h']} OU {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
     ]
 
-    # --- LOGIQUE FIXÉE : ULTRA AGRESSIF (30% à 100%) ---
     best_o = max(opts, key=lambda x: x['p'] * x['c'])
     if best_o['p'] * best_o['c'] > 1.02:
         b_val = best_o['c'] - 1
-        # Calcul du Kelly pur
         k_val = ((b_val * best_o['p']) - (1 - best_o['p'])) / b_val if b_val > 0 else 0
-        
-        # Application des limites strictes 30% - 100%
         m_finale = bankroll * k_val
-        m_finale = max(bankroll * 0.30, m_finale) # Jamais sous 30%
-        m_finale = min(m_finale, bankroll * 1.00)  # Jusqu'à 100%
+        m_finale = max(bankroll * 0.30, m_finale) 
+        m_finale = min(m_finale, bankroll * 1.00) 
         
         st.markdown(f"<div class='verdict-text'>IA RECOMMANDE : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
     else:
@@ -197,3 +215,11 @@ if st.session_state.simulation_done:
     sc1, sc2, sc3 = st.columns(3)
     for i in range(3):
         with [sc1, sc2, sc3][i]: st.write(f"**{idx[0][i]} - {idx[1][i]}** ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+
+# --- FOOTER GITHUB ---
+st.markdown("""
+    <div class='footer'>
+        DÉVELOPPÉ PAR ITROZ | 
+        <a href='https://github.com/clementrnx' target='_blank'>GITHUB SOURCE</a>
+    </div>
+""", unsafe_allow_html=True)
