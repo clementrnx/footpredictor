@@ -133,13 +133,11 @@ if st.session_state.simulation_done:
     d = st.session_state.data
     st.write("---")
     
-    # METRICS
     m1, m2, m3 = st.columns(3)
     m1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
     m2.metric("NUL", f"{d['p_n']*100:.1f}%")
     m3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
 
-    # --- SECTION BET (IA PRIORITAIRE) ---
     st.subheader("🤖 MODE BET")
     st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
     
@@ -163,18 +161,23 @@ if st.session_state.simulation_done:
         {"n": f"{d['t_h']} OU {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
     ]
 
+    # --- LOGIQUE FIXÉE : ULTRA AGRESSIF (30% à 100%) ---
     best_o = max(opts, key=lambda x: x['p'] * x['c'])
     if best_o['p'] * best_o['c'] > 1.02:
         b_val = best_o['c'] - 1
+        # Calcul du Kelly pur
         k_val = ((b_val * best_o['p']) - (1 - best_o['p'])) / b_val if b_val > 0 else 0
-        m_finale = max(bankroll * 0.30, bankroll * k_val * 0.5)
-        m_finale = min(m_finale, bankroll * 0.25)
+        
+        # Application des limites strictes 30% - 100%
+        m_finale = bankroll * k_val
+        m_finale = max(bankroll * 0.30, m_finale) # Jamais sous 30%
+        m_finale = min(m_finale, bankroll * 1.00)  # Jusqu'à 100%
+        
         st.markdown(f"<div class='verdict-text'>IA RECOMMANDE : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
     else:
         st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- SECTION AUDIT ---
     st.subheader("🔍 AUDIT DU TICKET")
     aud1, aud2 = st.columns(2)
     aud_choix = aud1.selectbox("VOTRE PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
@@ -189,7 +192,6 @@ if st.session_state.simulation_done:
     stat = "SAFE" if audit_val >= 1.10 else ("MID" if audit_val >= 0.98 else "DANGEREUX")
     st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
 
-    # --- SCORES ---
     st.subheader("SCORES PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
     sc1, sc2, sc3 = st.columns(3)
