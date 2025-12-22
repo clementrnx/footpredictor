@@ -16,9 +16,11 @@ st.markdown("""
     
     h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
 
+    /* BOUTON STYLE BARRE TRANSLUCIDE */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(15px) !important;
+        -webkit-backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.4) !important;
         color: #FFD700 !important;
         border-radius: 10px !important;
@@ -26,22 +28,28 @@ st.markdown("""
         width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
+        letter-spacing: 3px !important;
+        margin-top: 10px;
+        margin-bottom: 10px;
     }
     
-    div.stButton > button:hover { border: 1px solid #FFD700 !important; box-shadow: 0 0 20px rgba(255, 215, 0, 0.2); }
+    div.stButton > button:hover { 
+        background: rgba(255, 215, 0, 0.2) !important;
+        border: 1px solid #FFD700 !important; 
+    }
 
     div[data-baseweb="select"], div[data-baseweb="input"], input { background: transparent !important; border: none !important; }
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
         background: transparent !important; border-bottom: 2px solid #FFD700 !important; border-radius: 0px !important;
     }
 
-    .autobet-card {
+    .bet-card {
         background: rgba(255, 255, 255, 0.03);
         backdrop-filter: blur(20px);
         border: 2px solid #FFD700;
         padding: 30px;
         border-radius: 20px;
-        margin-top: 30px;
+        margin-top: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -101,75 +109,4 @@ if st.session_state.simulation_done:
     r1, r2, r3 = st.columns(3)
     r1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
     r2.metric("NUL", f"{d['p_n']*100:.1f}%")
-    r3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
-
-    st.subheader("AUDIT DU TICKET")
-    a_col1, a_col2, a_col3 = st.columns(3)
-    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
-    cote_audit = a_col2.number_input("COTE", value=1.50, step=0.01)
-    mise_audit = a_col3.number_input("MISE (€)", value=10.0)
-
-    if st.button("AJUSTER L'AUDIT"):
-        prob_ia = d['p_h'] if choix == d['t_h'] else (d['p_n'] if choix == "Nul" else d['p_a'])
-        if "ou Nul" in choix and d['t_h'] in choix: prob_ia = d['p_h'] + d['p_n']
-        elif "Nul ou" in choix: prob_ia = d['p_n'] + d['p_a']
-        elif "ou" in choix: prob_ia = d['p_h'] + d['p_a']
-        ev = prob_ia * cote_audit
-        if ev >= 1.10: st.success(f"VERDICT : SAFE (Value: {ev:.2f})")
-        elif ev >= 0.98: st.warning(f"VERDICT : MID (Value: {ev:.2f})")
-        else: st.error(f"VERDICT : ENLÈVE (Value: {ev:.2f})")
-
-    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
-    st.subheader("🤖 MODE AUTOBET AGRESSIF")
-    
-    at1, at2, at3, at4 = st.columns(4)
-    bankroll = at1.number_input("Capital (€)", value=100.0)
-    c_h, c_n, c_a = at2.number_input(f"Cote {d['t_h']}", value=2.0), at3.number_input("Cote NUL", value=3.0), at4.number_input(f"Cote {d['t_a']}", value=3.0)
-
-    st.write("---")
-    at5, at6, at7 = st.columns(3)
-    c_hn, c_na, c_ha = at5.number_input(f"{d['t_h']} / Nul", value=1.30), at6.number_input(f"Nul / {d['t_a']}", value=1.30), at7.number_input(f"{d['t_h']} / {d['t_a']}", value=1.30)
-
-    options = [
-        {"n": d['t_h'], "p": d['p_h'], "c": c_h},
-        {"n": "Nul", "p": d['p_n'], "c": c_n},
-        {"n": d['t_a'], "p": d['p_a'], "c": c_a},
-        {"n": f"{d['t_h']} ou Nul", "p": d['p_h'] + d['p_n'], "c": c_hn},
-        {"n": f"Nul ou {d['t_a']}", "p": d['p_n'] + d['p_a'], "c": c_na},
-        {"n": f"{d['t_h']} ou {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
-    ]
-
-    best = None
-    max_ev = 0
-    for o in options:
-        o['ev'] = o['p'] * o['c']
-        if o['ev'] > 1.03 and o['ev'] > max_ev:
-            max_ev = o['ev']
-            best = o
-
-    if best:
-        b = best['c'] - 1
-        # Kelly Critérium (Full Kelly à 0.4 pour être agressif)
-        kelly_fraction = ((b * best['p']) - (1 - best['p'])) / b
-        mise_brute = bankroll * max(0, kelly_fraction * 0.4)
-        
-        # LOGIQUE AGRESSIVE : Minimum 30% de la bankroll si l'opportunité est bonne
-        # Mais on garde un cap à 25% du capital total pour la survie.
-        mise_finale = max(bankroll * 0.30, mise_brute)
-        mise_finale = min(mise_finale, bankroll * 0.25) # Hard cap à 25%
-        if mise_finale < 1.0: mise_finale = 1.0
-
-        st.write(f"### 🚀 VERDICT AGRESSIF : **{best['n'].upper()}**")
-        st.write(f"Mise à placer : **{mise_finale:.2f}€**")
-        st.write(f"Confiance IA : **{best['p']*100:.1f}%** | EV : **{best['ev']:.2f}**")
-    else:
-        st.write("### ❌ AUCUN VALUE BET. NE PAS PARIER.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
-    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
-    s1, s2, s3 = st.columns(3)
-    for i in range(3):
-        with [s1, s2, s3][i]:
-            st.write(f"**TOP {i+1}**")
-            st.write(f"{idx[0][i]} - {idx[1][i]} ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+    r3.metric(d['t_a'], f"{d['p_a']*1
