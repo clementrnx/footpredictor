@@ -20,13 +20,15 @@ st.markdown("""
         color: #FFD700 !important; 
         font-family: 'Monospace', sans-serif; 
     }
-    
+
+    /* FIX BOUTONS : NOIR SUR JAUNE SANS BORDURES PARASITES */
     div.stButton > button {
         background-color: #FFD700 !important;
-        border: 2px solid #000000 !important;
+        border: none !important;
         border-radius: 8px !important;
         height: 55px !important;
         width: 100% !important;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.5);
     }
     div.stButton > button p {
         color: #000000 !important;
@@ -35,16 +37,22 @@ st.markdown("""
         text-transform: uppercase !important;
     }
 
-    div[data-testid="stMetric"] {
-        background: rgba(0, 0, 0, 0.8) !important;
-        border: 1px solid #FFD700 !important;
-        border-radius: 10px;
-    }
-    
-    input, select, div[data-baseweb="select"] {
-        background-color: #000000 !important;
+    /* NETTOYAGE DES ZONES D'INSERTION (INPUTS) */
+    div[data-baseweb="select"], div[data-baseweb="input"], input {
+        background-color: transparent !important;
         color: #FFD700 !important;
         border: 1px solid #FFD700 !important;
+        border-radius: 5px !important;
+    }
+    
+    /* Supprime le rectangle gris de fond des inputs Streamlit */
+    div[data-testid="stWidgetLabel"] + div {
+        background-color: transparent !important;
+    }
+
+    div[data-testid="stMetric"] {
+        background: transparent !important;
+        border: none !important;
     }
     
     .audit-card {
@@ -75,8 +83,15 @@ if 'simulation_done' not in st.session_state:
 
 st.title("iTrOz Predictor - VF")
 
-leagues = {"Premier League": 39, "La Liga": 140, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
-l_name = st.selectbox("Choisir un championnat", list(leagues.keys()))
+leagues = {
+    "Ligue des Champions": 2,
+    "Premier League": 39, 
+    "La Liga": 140, 
+    "Serie A": 135, 
+    "Bundesliga": 78, 
+    "Ligue 1": 61
+}
+l_name = st.selectbox("Compétition", list(leagues.keys()))
 l_id = leagues[l_name]
 
 teams_res = get_api("teams", {"league": l_id, "season": SEASON})
@@ -159,14 +174,14 @@ if st.session_state.simulation_done:
         else:
             st.write("<h2 style='color:#FF4B4B !important;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
         
-        st.write(f"Probabilité combinée : **{prob_ia*100:.1f}%** | Rentabilité estimée : **{((ev-1)*100):.1f}%**")
+        st.write(f"Probabilité : **{prob_ia*100:.1f}%** | Rentabilité : **{((ev-1)*100):.1f}%**")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.subheader("Scores les plus probables")
+    st.subheader("Scores Probables")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
     sc_col1, sc_col2, sc_col3 = st.columns(3)
-    cols = [sc_col1, sc_col2, sc_col3]
     for i in range(3):
-        cols[i].write(f"**Top {i+1}**")
-        cols[i].write(f"Score : {idx[0][i]} - {idx[1][i]}")
-        cols[i].write(f"({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+        with [sc_col1, sc_col2, sc_col3][i]:
+            st.write(f"**Top {i+1}**")
+            st.write(f"Score : {idx[0][i]} - {idx[1][i]}")
+            st.write(f"({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
