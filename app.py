@@ -19,6 +19,7 @@ st.markdown("""
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(15px) !important;
+        -webkit-backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.4) !important;
         color: #FFD700 !important;
         border-radius: 10px !important;
@@ -26,6 +27,7 @@ st.markdown("""
         width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
+        letter-spacing: 2px !important;
     }
     
     div.stButton > button:hover { border: 1px solid #FFD700 !important; box-shadow: 0 0 20px rgba(255, 215, 0, 0.2); }
@@ -34,6 +36,8 @@ st.markdown("""
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
         background: transparent !important; border-bottom: 2px solid #FFD700 !important; border-radius: 0px !important;
     }
+
+    div[data-testid="stMetric"] { background: transparent !important; border: none !important; }
 
     .autobet-card {
         background: rgba(255, 255, 255, 0.03);
@@ -97,49 +101,66 @@ if teams:
 if st.session_state.simulation_done:
     d = st.session_state.data
     st.divider()
-    st.subheader("🤖 MODE AUTOBET")
-    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
     
-    col_bank, col_c1, col_cn, col_c2 = st.columns(4)
-    bankroll = col_bank.number_input("Capital (€)", value=1000)
-    c_h = col_c1.number_input(f"Cote {d['t_h']}", value=2.0)
-    c_n = col_cn.number_input("Cote NUL", value=3.0)
-    c_a = col_c2.number_input(f"Cote {d['t_a']}", value=3.0)
+    r1, r2, r3 = st.columns(3)
+    r1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
+    r2.metric("NUL", f"{d['p_n']*100:.1f}%")
+    r3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
 
-    # Calcul des options de paris incluant les Doubles Chances
+    st.subheader("AUDIT DU TICKET")
+    a_col1, a_col2, a_col3 = st.columns(3)
+    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
+    cote_audit = a_col2.number_input("COTE", value=1.50, step=0.01)
+    mise_audit = a_col3.number_input("MISE (€)", value=10)
+
+    if st.button("AJUSTER L'AUDIT"):
+        prob_ia = d['p_h'] if choix == d['t_h'] else (d['p_n'] if choix == "Nul" else d['p_a'])
+        if "ou Nul" in choix and d['t_h'] in choix: prob_ia = d['p_h'] + d['p_n']
+        elif "Nul ou" in choix: prob_ia = d['p_n'] + d['p_a']
+        elif "ou" in choix: prob_ia = d['p_h'] + d['p_a']
+        
+        ev = prob_ia * cote_audit
+        if ev >= 1.10: st.success(f"VERDICT : SAFE (Value: {ev:.2f})")
+        elif ev >= 0.98: st.warning(f"VERDICT : MID (Value: {ev:.2f})")
+        else: st.error(f"VERDICT : ENLÈVE (Value: {ev:.2f})")
+
+    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
+    st.subheader("🤖 MODE AUTOBET")
+    atb1, atb2, atb3, atb4 = st.columns(4)
+    bankroll = atb1.number_input("Capital (€)", value=1000)
+    c_h, c_n, c_a = atb2.number_input(f"Cote {d['t_h']}", value=2.0), atb3.number_input("Cote NUL", value=3.0), atb4.number_input(f"Cote {d['t_a']}", value=3.0)
+
     options = [
         {"name": d['t_h'], "prob": d['p_h'], "cote": c_h},
         {"name": "Nul", "prob": d['p_n'], "cote": c_n},
         {"name": d['t_a'], "prob": d['p_a'], "cote": c_a},
-        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": 1 / ( (1/c_h) + (1/c_n) ) * 0.9}, # Approximation safe
-        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": 1 / ( (1/c_n) + (1/c_a) ) * 0.9},
-        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": 1 / ( (1/c_h) + (1/c_a) ) * 0.9}
+        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": 1/((1/c_h)+(1/c_n))*0.95},
+        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": 1/((1/c_n)+(1/c_a))*0.95},
+        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": 1/((1/c_h)+(1/c_a))*0.95}
     ]
 
-    # Calcul de l'EV et de la mise de Kelly pour chaque option
-    for opt in options:
-        opt['ev'] = (opt['prob'] * opt['cote'])
-        # Formule de Kelly : (bp - q) / b  où b = cote-1, p = proba, q = 1-p
-        b = opt['cote'] - 1
-        if b > 0:
-            k = (b * opt['prob'] - (1 - opt['prob'])) / b
-            opt['kelly'] = max(0, k * 0.15) # On ne mise que 15% de ce que Kelly suggère (Fractional Kelly) pour être ultra safe
-        else: opt['kelly'] = 0
+    best = None
+    max_ev = 0
+    for o in options:
+        o['ev'] = o['prob'] * o['cote']
+        if o['ev'] > 1.05 and o['ev'] > max_ev:
+            max_ev = o['ev']
+            best = o
 
-    # Filtrer les Value Bets (EV > 1.0) et prendre le meilleur
-    value_bets = [o for o in options if o['ev'] > 1.02]
-    
-    if value_bets:
-        best = max(value_bets, key=lambda x: x['ev'])
-        mise_finale = bankroll * best['kelly']
-        # Restriction stricte : Jamais plus de 5% de la bankroll
-        mise_finale = min(mise_finale, bankroll * 0.05)
-        
-        st.write(f"### ✅ CONSEIL PRO : PARIER SUR **{best['name'].upper()}**")
-        st.write(f"Mise recommandée : **{mise_finale:.2f}€** (Soit { (mise_finale/bankroll)*100 :.1f}% de ton capital)")
-        st.write(f"Pourquoi ? L'IA estime la probabilité à **{best['prob']*100:.1f}%** contre une cote de **{best['cote']:.2f}** (Value: {best['ev']:.2f})")
-    else:
-        st.write("### ❌ AUCUN PARI SAFE")
-        st.write("Le risque est trop élevé par rapport aux cotes proposées. Ne parie pas sur ce match.")
-
+    if best:
+        b = best['cote'] - 1
+        kelly = max(0, ((b * best['prob']) - (1 - best['prob'])) / b) * 0.15
+        mise = min(bankroll * kelly, bankroll * 0.05)
+        st.write(f"### ✅ CONSEIL : PARIER SUR **{best['name'].upper()}**")
+        st.write(f"Mise : **{mise:.2f}€** | Confiance : **{best['prob']*100:.1f}%**")
+    else: st.write("### ❌ AUCUN PARI VALUE DETECTÉ")
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("SCORES PROBABLES")
+    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
+    s1, s2, s3 = st.columns(3)
+    for i in range(3):
+        with [s1, s2, s3][i]:
+            st.write(f"**TOP {i+1}**")
+            st.write(f"{idx[0][i]} - {idx[1][i]} ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
