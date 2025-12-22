@@ -38,20 +38,26 @@ st.markdown("""
         box-shadow: 0 0 40px rgba(255, 215, 0, 0.15);
     }
 
-    /* CHAMPS DE SAISIE GLASSMOPHISM TOTAL */
+    /* CHAMPS DE SAISIE GLASSMOPHISM SANS BARRES */
     div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
         background-color: rgba(255, 255, 255, 0.05) !important;
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
-        border: 0.5px solid rgba(255, 215, 0, 0.15) !important;
+        border: 0.5px solid rgba(255, 215, 0, 0.1) !important;
         border-radius: 10px !important;
         color: #FFD700 !important;
+        /* Suppression des lignes et bordures internes */
+        border-bottom: 0.5px solid rgba(255, 215, 0, 0.1) !important; 
     }
 
-    /* Suppression des bordures par défaut de Streamlit */
-    div[data-baseweb="base-input"] {
+    /* Suppression spécifique des barres de focus et soulignements Streamlit */
+    div[data-baseweb="base-input"], div[data-baseweb="select"] > div {
+        border-bottom: none !important;
         background-color: transparent !important;
-        border: none !important;
+    }
+    
+    .stSelectbox [data-baseweb="select"] > div {
+        border-bottom: none !important;
     }
 
     .verdict-text {
