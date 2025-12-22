@@ -48,16 +48,10 @@ st.markdown("""
         color: #FFD700 !important;
     }
 
-    /* SUPPRESSION SPÉCIFIQUE DES BARRES SOUS LES SELECTBOX ET INPUTS */
-    div[data-baseweb="base-input"], div[data-baseweb="select"] > div {
+    /* Suppression des bordures par défaut de Streamlit */
+    div[data-baseweb="base-input"] {
         background-color: transparent !important;
         border: none !important;
-    }
-    
-    /* Enlever le soulignement focus de Streamlit */
-    div[data-baseweb="select"] > div:focus-within, div[data-baseweb="input"]:focus-within {
-        border: none !important;
-        outline: none !important;
     }
 
     .verdict-text {
