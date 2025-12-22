@@ -3,75 +3,68 @@ import requests
 import numpy as np
 from scipy.stats import poisson
 
-st.set_page_config(page_title="iTrOz Predictor - VF", layout="wide")
+st.set_page_config(page_title="iTrOz Predictor", layout="wide")
 
 st.markdown("""
     <style>
-    /* 1. Fond et Voile */
     .stApp {
         background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
         background-size: cover;
         background-attachment: fixed;
     }
     .stApp > div:first-child {
-        background-color: rgba(0, 0, 0, 0.88);
+        background-color: rgba(0, 0, 0, 0.85);
     }
     
-    /* 2. Texte Global */
     h1, h2, h3, p, span, label { 
         color: #FFD700 !important; 
-        font-family: 'Monospace', sans-serif; 
-        text-shadow: 1px 1px 2px black;
+        font-family: 'Monospace', sans-serif;
     }
 
-    /* 3. SUPPRESSION RADICALE DES BLOCS GRIS (Inputs & Selects) */
-    div[data-baseweb="select"], div[data-baseweb="input"], input, .stSelectbox, .stNumberInput {
-        background-color: transparent !important;
-        border: none !important;
-    }
-    
-    /* On ne garde qu'une ligne dorée fine sous les choix pour l'élégance */
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
-        background-color: rgba(255, 215, 0, 0.05) !important;
-        border-bottom: 2px solid #FFD700 !important;
-        border-radius: 0px !important;
+    /* EFFET GLASSMORPHISM SUR TOUS LES BOUTONS */
+    div.stButton > button {
+        background: rgba(255, 215, 0, 0.1) !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        border: 2px solid #FFD700 !important;
         color: #FFD700 !important;
-    }
-
-    /* 4. FIX BOUTONS : JAUNE PUR / TEXTE NOIR */
-    button {
-        background-color: #FFD700 !important;
-        color: #000000 !important;
-        border-radius: 4px !important;
-        border: none !important;
-        height: 50px !important;
+        border-radius: 12px !important;
+        height: 55px !important;
+        width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
-        letter-spacing: 2px !important;
-        margin-top: 10px !important;
+        transition: 0.3s;
     }
     
-    /* Suppression des effets de survol gris moches */
-    button:hover {
-        border: 1px solid white !important;
-        color: #000000 !important;
+    div.stButton > button:hover {
+        background: rgba(255, 215, 0, 0.3) !important;
+        box-shadow: 0 0 15px #FFD700;
     }
 
-    /* 5. ÉLÉMENTS DE RÉSULTATS (Metrics) */
+    /* SUPPRESSION TOTALE DES BLOCS D'INSERTION */
+    div[data-baseweb="select"], div[data-baseweb="input"], input {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        background: transparent !important;
+        border-bottom: 2px solid #FFD700 !important;
+        border-radius: 0px !important;
+    }
+
+    /* NETTOYAGE DES METRICS */
     div[data-testid="stMetric"] {
         background: transparent !important;
         border: none !important;
     }
-    div[data-testid="stMetricValue"] {
-        color: #FFD700 !important;
-        font-size: 3rem !important;
-    }
-
-    /* 6. CARTE AUDIT ÉPURÉE */
+    
+    /* CARTE AUDIT GLASS */
     .audit-card {
-        background: rgba(0, 0, 0, 0.6);
-        border: 1px solid #FFD700;
-        padding: 30px;
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 215, 0, 0.3);
+        padding: 25px;
         border-radius: 20px;
         margin-top: 20px;
     }
@@ -115,7 +108,7 @@ if teams:
     t_h = c1.selectbox("DOMICILE", sorted(teams.keys()))
     t_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), index=1)
 
-    if st.button("ANALYSER LE MATCH"):
+    if st.button("Lancer l'Analyse"):
         id_h, id_a = teams[t_h], teams[t_a]
         s_h = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_h})
         s_a = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_a})
@@ -160,39 +153,29 @@ if st.session_state.simulation_done:
     st.markdown("<div class='audit-card'>", unsafe_allow_html=True)
     st.subheader("AUDIT DU TICKET")
     a_col1, a_col2, a_col3 = st.columns(3)
-    choix = a_col1.selectbox("VOTRE PARI", [
-        d['t_h'], "Nul", d['t_a'], 
-        "1N", "N2", "12"
-    ])
+    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], "1N", "N2", "12"])
     cote = a_col2.number_input("COTE", value=1.50, step=0.01)
-    mise = a_col3.number_input("MISE (€)", value=10)
+    mise = a_col3.number_input("MISE", value=10)
 
-    if choix == d['t_h']: prob_ia = d['p_h']
-    elif choix == "Nul": prob_ia = d['p_n']
-    elif choix == d['t_a']: prob_ia = d['p_a']
-    elif "1N" in choix: prob_ia = d['p_h'] + d['p_n']
+    prob_ia = (d['p_h'] if choix == d['t_h'] else (d['p_n'] if choix == "Nul" else d['p_a']))
+    if "1N" in choix: prob_ia = d['p_h'] + d['p_n']
     elif "N2" in choix: prob_ia = d['p_n'] + d['p_a']
     elif "12" in choix: prob_ia = d['p_h'] + d['p_a']
     
     prob_ia /= 100
     ev = prob_ia * cote
 
-    if ev >= 1.10:
-        st.write("<h2 style='color:#00FF00 !important; text-align:center;'>VERDICT : SAFE</h2>", unsafe_allow_html=True)
-    elif ev >= 0.98:
-        st.write("<h2 style='color:#FFD700 !important; text-align:center;'>VERDICT : MID</h2>", unsafe_allow_html=True)
-    else:
-        st.write("<h2 style='color:#FF4B4B !important; text-align:center;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
+    if ev >= 1.10: st.write("<h2 style='color:#00FF00 !important; text-align:center;'>VERDICT : SAFE</h2>", unsafe_allow_html=True)
+    elif ev >= 0.98: st.write("<h2 style='color:#FFD700 !important; text-align:center;'>VERDICT : MID</h2>", unsafe_allow_html=True)
+    else: st.write("<h2 style='color:#FF4B4B !important; text-align:center;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
     
-    st.write(f"<p style='text-align:center;'>Confiance : {prob_ia*100:.1f}% | Rentabilité : {((ev-1)*100):.1f}%</p>", unsafe_allow_html=True)
+    st.write(f"<p style='text-align:center;'>Value : {((ev-1)*100):.1f}%</p>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("SCORES PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
     s1, s2, s3 = st.columns(3)
-    cols = [s1, s2, s3]
     for i in range(3):
-        cols[i].write(f"**TOP {i+1}**")
-        cols[i].write(f"{idx[0][i]} - {idx[1][i]}")
-        cols[i].write(f"({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+        with [s1, s2, s3][i]:
+            st.write(f"**TOP {i+1}**")
+            st.write(f"{idx[0][i]} - {idx[1][i]} ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
