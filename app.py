@@ -7,78 +7,75 @@ st.set_page_config(page_title="iTrOz Predictor", layout="wide")
 
 st.markdown("""
     <style>
+    /* FOND DE L'APPLICATION */
     .stApp {
         background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
         background-size: cover;
         background-attachment: fixed;
     }
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.88); }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.90); }
     
-    /* SUPPRESSION TOTALE DES BULLES DERRIÈRE LES LABELS */
-    h1, h2, h3, p, span, label, .stMarkdown p { 
-        color: #FFD700 !important; 
-        font-family: 'Monospace', sans-serif; 
-        letter-spacing: 2px;
-        background: transparent !important;
+    /* SUPPRESSION RADICALE DES FONDS DERRIÈRE TOUS LES TEXTES */
+    div[data-testid="stWidgetLabel"], label, p, span, h1, h2, h3 {
+        background-color: transparent !important;
+        background: none !important;
+        color: #FFD700 !important;
+        font-family: 'Monospace', sans-serif !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    /* NETTOYAGE DES CONTENEURS DE TEXTE (LES "BULLES") */
+    div[data-testid="stMarkdownContainer"] {
         background-color: transparent !important;
     }
 
-    /* BOUTON GLASS - SANS LUEUR/BRILLANCE (Box-shadow supprimé) */
+    /* BOUTON LONG ET GLASS SANS AUCUNE BRILLANCE/LUEUR */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.03) !important;
         backdrop-filter: blur(25px) !important;
-        -webkit-backdrop-filter: blur(25px) !important;
-        border: 1px solid rgba(255, 215, 0, 0.2) !important;
+        border: 1px solid rgba(255, 215, 0, 0.15) !important;
         color: #FFD700 !important;
-        border-radius: 10px !important;
-        height: 70px !important;
+        border-radius: 5px !important;
+        height: 75px !important;
         width: 100% !important;
-        font-weight: 200 !important;
         text-transform: uppercase !important;
-        letter-spacing: 12px !important;
-        transition: 0.4s;
-        box-shadow: none !important; /* Enlève la brillance */
+        letter-spacing: 15px !important;
+        transition: 0.3s;
+        box-shadow: none !important;
     }
     
     div.stButton > button:hover { 
         background: rgba(255, 215, 0, 0.08) !important;
-        border: 1px solid rgba(255, 215, 0, 0.4) !important;
-        letter-spacing: 16px !important;
+        letter-spacing: 18px !important;
         box-shadow: none !important;
     }
 
-    /* CHAMPS DE SAISIE - TRANSLUCIDES SANS BRILLANCE */
+    /* CHAMPS DE SAISIE ÉPURÉS (NI BRILLANCE, NI LUEUR) */
     div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        backdrop-filter: blur(10px) !important;
+        background-color: rgba(255, 255, 255, 0.04) !important;
+        backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.1) !important;
-        border-radius: 5px !important;
+        border-radius: 0px !important;
         color: #FFD700 !important;
         box-shadow: none !important;
     }
 
-    /* NETTOYAGE DES INPUTS STREAMLIT */
-    div[data-baseweb="base-input"], div[role="listbox"] {
-        background-color: transparent !important;
+    /* ENLEVER LA BARRE LATÉRALE ET LES LIGNES DE SÉPARATION */
+    .bet-card {
+        background: transparent !important;
         border: none !important;
+        padding: 0px !important;
     }
 
     .verdict-text {
-        font-size: 26px;
+        font-size: 28px;
         font-weight: 900;
         text-align: center;
-        padding: 30px;
-        letter-spacing: 6px;
+        padding: 40px;
+        letter-spacing: 10px;
         text-transform: uppercase;
-        margin: 15px 0;
-    }
-
-    .bet-card {
-        background: rgba(255, 255, 255, 0.01);
-        padding: 30px;
-        border-radius: 15px;
-        border: 1px solid rgba(255, 215, 0, 0.05);
-        margin-bottom: 40px;
+        background: transparent !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -135,11 +132,7 @@ if st.session_state.simulation_done:
     d = st.session_state.data
     st.write("---")
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
-    m2.metric("NUL", f"{d['p_n']*100:.1f}%")
-    m3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
-
+    # --- MODE BET ---
     st.subheader("🤖 MODE BET")
     st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
     
@@ -163,6 +156,7 @@ if st.session_state.simulation_done:
         st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # --- AUDIT ---
     st.subheader("🔍 AUDIT DU TICKET")
     aud1, aud2 = st.columns(2)
     aud_choix = aud1.selectbox("VOTRE PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
@@ -177,8 +171,10 @@ if st.session_state.simulation_done:
     stat = "SAFE" if audit_val >= 1.10 else ("MID" if audit_val >= 0.98 else "DANGEREUX")
     st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
 
+    # --- SCORES ---
     st.subheader("SCORES PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
     sc1, sc2, sc3 = st.columns(3)
     for i in range(3):
         with [sc1, sc2, sc3][i]: st.write(f"**{idx[0][i]} - {idx[1][i]}** ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+            
