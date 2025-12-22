@@ -21,25 +21,31 @@ st.markdown("""
         font-family: 'Monospace', sans-serif;
     }
 
+    /* LE BOUTON DEVIENT LA BARRE TRANSLUCIDE */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
-        backdrop-filter: blur(10px) !important;
-        -webkit-backdrop-filter: blur(10px) !important;
-        border: 2px solid #FFD700 !important;
+        backdrop-filter: blur(15px) !important;
+        -webkit-backdrop-filter: blur(15px) !important;
+        border: 1px solid rgba(255, 215, 0, 0.4) !important;
         color: #FFD700 !important;
-        border-radius: 12px !important;
-        height: 55px !important;
+        border-radius: 10px !important;
+        height: 60px !important;
         width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
-        transition: 0.3s;
+        letter-spacing: 3px !important;
+        transition: 0.4s;
+        margin-top: 20px;
+        margin-bottom: 20px;
     }
     
     div.stButton > button:hover {
-        background: rgba(255, 215, 0, 0.3) !important;
-        box-shadow: 0 0 15px #FFD700;
+        background: rgba(255, 215, 0, 0.2) !important;
+        border: 1px solid #FFD700 !important;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
     }
 
+    /* NETTOYAGE DES INPUTS */
     div[data-baseweb="select"], div[data-baseweb="input"], input {
         background: transparent !important;
         border: none !important;
@@ -55,14 +61,11 @@ st.markdown("""
         background: transparent !important;
         border: none !important;
     }
-    
-    .audit-card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(15px);
-        border: 1px solid rgba(255, 215, 0, 0.3);
-        padding: 25px;
-        border-radius: 20px;
-        margin-top: 20px;
+
+    /* ZONE DE RESULTATS SANS RECTANGLE */
+    .result-zone {
+        padding: 20px;
+        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -146,14 +149,10 @@ if st.session_state.simulation_done:
     res2.metric("NUL", f"{d['p_n']:.1f}%")
     res3.metric(d['t_a'], f"{d['p_a']:.1f}%")
 
-    st.markdown("<div class='audit-card'>", unsafe_allow_html=True)
     st.subheader("AUDIT DU TICKET")
-    
     a_col1, a_col2, a_col3 = st.columns(3)
     choix = a_col1.selectbox("PARI", [
-        d['t_h'], 
-        "Nul", 
-        d['t_a'], 
+        d['t_h'], "Nul", d['t_a'], 
         f"{d['t_h']} ou Nul", 
         f"Nul ou {d['t_a']}", 
         f"{d['t_h']} ou {d['t_a']}"
@@ -161,9 +160,9 @@ if st.session_state.simulation_done:
     cote = a_col2.number_input("COTE", value=1.50, step=0.01)
     mise = a_col3.number_input("MISE", value=10)
 
-    # Bouton avec texte spécifique
+    # LE BOUTON EST MAINTENANT LA BARRE TRANSLUCIDE
     if st.button("AJUSTER L'AUDIT"):
-        st.toast("Calcul en cours...")
+        pass
 
     prob_ia = 0
     if choix == d['t_h']: prob_ia = d['p_h']
@@ -176,11 +175,12 @@ if st.session_state.simulation_done:
     prob_ia /= 100
     ev = prob_ia * cote
 
-    if ev >= 1.10: st.write("<h2 style='color:#00FF00 !important; text-align:center;'>VERDICT : SAFE</h2>", unsafe_allow_html=True)
-    elif ev >= 0.98: st.write("<h2 style='color:#FFD700 !important; text-align:center;'>VERDICT : MID</h2>", unsafe_allow_html=True)
-    else: st.write("<h2 style='color:#FF4B4B !important; text-align:center;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
+    st.markdown("<div class='result-zone'>", unsafe_allow_html=True)
+    if ev >= 1.10: st.write("<h2 style='color:#00FF00 !important;'>VERDICT : SAFE</h2>", unsafe_allow_html=True)
+    elif ev >= 0.98: st.write("<h2 style='color:#FFD700 !important;'>VERDICT : MID</h2>", unsafe_allow_html=True)
+    else: st.write("<h2 style='color:#FF4B4B !important;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
     
-    st.write(f"<p style='text-align:center;'>Confiance : {prob_ia*100:.1f}% | Rentabilité : {((ev-1)*100):.1f}%</p>", unsafe_allow_html=True)
+    st.write(f"Confiance : {prob_ia*100:.1f}% | Rentabilité : {((ev-1)*100):.1f}%")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
