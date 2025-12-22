@@ -19,7 +19,6 @@ st.markdown("""
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(15px) !important;
-        -webkit-backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.4) !important;
         color: #FFD700 !important;
         border-radius: 10px !important;
@@ -111,7 +110,7 @@ if st.session_state.simulation_done:
     a_col1, a_col2, a_col3 = st.columns(3)
     choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
     cote_audit = a_col2.number_input("COTE", value=1.50, step=0.01)
-    mise_audit = a_col3.number_input("MISE (€)", value=10)
+    mise_audit = a_col3.number_input("MISE (€)", value=10.0)
 
     if st.button("AJUSTER L'AUDIT"):
         prob_ia = d['p_h'] if choix == d['t_h'] else (d['p_n'] if choix == "Nul" else d['p_a'])
@@ -126,17 +125,29 @@ if st.session_state.simulation_done:
 
     st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
     st.subheader("🤖 MODE AUTOBET")
+    
+    # Ligne 1 : Capital et Cotes simples
     atb1, atb2, atb3, atb4 = st.columns(4)
-    bankroll = atb1.number_input("Capital (€)", value=1000)
-    c_h, c_n, c_a = atb2.number_input(f"Cote {d['t_h']}", value=2.0), atb3.number_input("Cote NUL", value=3.0), atb4.number_input(f"Cote {d['t_a']}", value=3.0)
+    bankroll = atb1.number_input("Capital (€)", value=1000.0, min_value=10.0)
+    c_h = atb2.number_input(f"Cote {d['t_h']}", value=2.0)
+    c_n = atb3.number_input("Cote NUL", value=3.0)
+    c_a = atb4.number_input(f"Cote {d['t_a']}", value=3.0)
+
+    # Ligne 2 : Cotes Doubles Chances
+    st.write("---")
+    st.write("**COTES DOUBLES CHANCES**")
+    atb5, atb6, atb7 = st.columns(3)
+    c_hn = atb5.number_input(f"{d['t_h']} ou Nul", value=1.30)
+    c_na = atb6.number_input(f"Nul ou {d['t_a']}", value=1.30)
+    c_ha = atb7.number_input(f"{d['t_h']} ou {d['t_a']}", value=1.30)
 
     options = [
         {"name": d['t_h'], "prob": d['p_h'], "cote": c_h},
         {"name": "Nul", "prob": d['p_n'], "cote": c_n},
         {"name": d['t_a'], "prob": d['p_a'], "cote": c_a},
-        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": 1/((1/c_h)+(1/c_n))*0.95},
-        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": 1/((1/c_n)+(1/c_a))*0.95},
-        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": 1/((1/c_h)+(1/c_a))*0.95}
+        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": c_hn},
+        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": c_na},
+        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": c_ha}
     ]
 
     best = None
@@ -149,11 +160,19 @@ if st.session_state.simulation_done:
 
     if best:
         b = best['cote'] - 1
-        kelly = max(0, ((b * best['prob']) - (1 - best['prob'])) / b) * 0.15
-        mise = min(bankroll * kelly, bankroll * 0.05)
+        # Kelly plus agressif (30%)
+        kelly = max(0, ((b * best['prob']) - (1 - best['prob'])) / b) * 0.30
+        mise = bankroll * kelly
+        
+        # Application du plafond (10% max) et du plancher (1€ min)
+        mise = max(1.0, min(mise, bankroll * 0.10))
+        
         st.write(f"### ✅ CONSEIL : PARIER SUR **{best['name'].upper()}**")
-        st.write(f"Mise : **{mise:.2f}€** | Confiance : **{best['prob']*100:.1f}%**")
-    else: st.write("### ❌ AUCUN PARI VALUE DETECTÉ")
+        st.write(f"Mise suggérée : **{mise:.2f}€**")
+        st.write(f"Indice de confiance : **{best['prob']*100:.1f}%** (Espérance de gain : **{best['ev']:.2f}**)")
+    else:
+        st.write("### ❌ AUCUNE OPPORTUNITÉ RENTABLE")
+        st.write("Attends un meilleur match ou de meilleures cotes.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
