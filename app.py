@@ -21,7 +21,6 @@ st.markdown("""
         font-family: 'Monospace', sans-serif;
     }
 
-    /* LE BOUTON DEVIENT LA BARRE TRANSLUCIDE */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(15px) !important;
@@ -45,7 +44,6 @@ st.markdown("""
         box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
     }
 
-    /* NETTOYAGE DES INPUTS */
     div[data-baseweb="select"], div[data-baseweb="input"], input {
         background: transparent !important;
         border: none !important;
@@ -62,10 +60,13 @@ st.markdown("""
         border: none !important;
     }
 
-    /* ZONE DE RESULTATS SANS RECTANGLE */
-    .result-zone {
-        padding: 20px;
-        text-align: center;
+    .autobet-card {
+        background: rgba(255, 215, 0, 0.05);
+        backdrop-filter: blur(15px);
+        border: 1px dashed #FFD700;
+        padding: 25px;
+        border-radius: 20px;
+        margin-top: 30px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -88,14 +89,7 @@ if 'simulation_done' not in st.session_state:
 
 st.title("iTrOz Predictor")
 
-leagues = {
-    "Champions League": 2,
-    "Premier League": 39, 
-    "La Liga": 140, 
-    "Serie A": 135, 
-    "Bundesliga": 78, 
-    "Ligue 1": 61
-}
+leagues = {"Champions League": 2, "Premier League": 39, "La Liga": 140, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
 l_name = st.selectbox("COMPÉTITION", list(leagues.keys()))
 l_id = leagues[l_name]
 
@@ -117,21 +111,13 @@ if teams:
             def_a = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('total', 1.3))
             att_a = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('total', 1.3))
             def_h = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('total', 1.3))
-
             lh, la = (att_h * def_a / 1.3) * 1.12, (att_a * def_h / 1.3)
-
             matrix = np.zeros((7, 7))
-            rho = -0.06
             for x in range(7):
                 for y in range(7):
                     p = poisson.pmf(x, lh) * poisson.pmf(y, la)
-                    if x==0 and y==0: p *= (1 - lh*la*rho)
-                    elif x==0 and y==1: p *= (1 + lh*rho)
-                    elif x==1 and y==0: p *= (1 + la*rho)
-                    elif x==1 and y==1: p *= (1 - rho)
                     matrix[x,y] = p
             matrix /= matrix.sum()
-
             st.session_state.data = {
                 'p_h': np.sum(np.tril(matrix, -1)) * 100,
                 'p_n': np.sum(np.diag(matrix)) * 100,
@@ -143,7 +129,6 @@ if teams:
 if st.session_state.simulation_done:
     d = st.session_state.data
     st.divider()
-    
     res1, res2, res3 = st.columns(3)
     res1.metric(d['t_h'], f"{d['p_h']:.1f}%")
     res2.metric("NUL", f"{d['p_n']:.1f}%")
@@ -151,36 +136,41 @@ if st.session_state.simulation_done:
 
     st.subheader("AUDIT DU TICKET")
     a_col1, a_col2, a_col3 = st.columns(3)
-    choix = a_col1.selectbox("PARI", [
-        d['t_h'], "Nul", d['t_a'], 
-        f"{d['t_h']} ou Nul", 
-        f"Nul ou {d['t_a']}", 
-        f"{d['t_h']} ou {d['t_a']}"
-    ])
+    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
     cote = a_col2.number_input("COTE", value=1.50, step=0.01)
-    mise = a_col3.number_input("MISE", value=10)
+    mise_audit = a_col3.number_input("MISE", value=10)
 
-    # LE BOUTON EST MAINTENANT LA BARRE TRANSLUCIDE
-    if st.button("AJUSTER L'AUDIT"):
-        pass
+    if st.button("AJUSTER L'AUDIT"): pass
 
-    prob_ia = 0
-    if choix == d['t_h']: prob_ia = d['p_h']
-    elif choix == "Nul": prob_ia = d['p_n']
-    elif choix == d['t_a']: prob_ia = d['p_a']
-    elif "ou Nul" in choix and d['t_h'] in choix: prob_ia = d['p_h'] + d['p_n']
-    elif "Nul ou" in choix: prob_ia = d['p_n'] + d['p_a']
-    elif "ou" in choix: prob_ia = d['p_h'] + d['p_a']
+    # --- CATEGORIE AUTOBET ---
+    st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
+    st.subheader("🤖 MODE AUTOBET")
     
-    prob_ia /= 100
-    ev = prob_ia * cote
+    atb1, atb2, atb3, atb4 = st.columns(4)
+    total_bankroll = atb1.number_input("Budget Total (€)", value=100)
+    c_h = atb2.number_input(f"Cote {d['t_h']}", value=2.10, step=0.05)
+    c_n = atb3.number_input("Cote NUL", value=3.20, step=0.05)
+    c_a = atb4.number_input(f"Cote {d['t_a']}", value=3.50, step=0.05)
 
-    st.markdown("<div class='result-zone'>", unsafe_allow_html=True)
-    if ev >= 1.10: st.write("<h2 style='color:#00FF00 !important;'>VERDICT : SAFE</h2>", unsafe_allow_html=True)
-    elif ev >= 0.98: st.write("<h2 style='color:#FFD700 !important;'>VERDICT : MID</h2>", unsafe_allow_html=True)
-    else: st.write("<h2 style='color:#FF4B4B !important;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
+    # Calcul de Kelly Criterion simplifié pour le safe betting
+    probs = [d['p_h']/100, d['p_n']/100, d['p_a']/100]
+    cotes = [c_h, c_n, c_a]
+    names = [d['t_h'], "Nul", d['t_a']]
     
-    st.write(f"Confiance : {prob_ia*100:.1f}% | Rentabilité : {((ev-1)*100):.1f}%")
+    evs = [(probs[i] * cotes[i]) for i in range(3)]
+    best_idx = np.argmax(evs)
+    
+    st.write("### 🎯 Ma recommandation :")
+    if evs[best_idx] > 1.05:
+        # Suggestion Safe : Mise fractionnée sur le meilleur EV
+        suggested_stake = total_bankroll * (probs[best_idx] - (1 - probs[best_idx]) / (cotes[best_idx] - 1)) * 0.2
+        suggested_stake = max(0, min(suggested_stake, total_bankroll * 0.1)) # Cap à 10% pour rester safe
+        
+        st.write(f"Placer **{suggested_stake:.2f}€** sur **{names[best_idx]}**")
+        st.write(f"Raison : Meilleur ratio Probabilité/Gain (EV: {evs[best_idx]:.2f})")
+    else:
+        st.write("⚠️ **PASSE TON TOUR.** Aucune issue n'offre assez de sécurité par rapport aux cotes.")
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
