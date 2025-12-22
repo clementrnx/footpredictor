@@ -26,7 +26,6 @@ st.markdown("""
         width: 100% !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
-        letter-spacing: 2px !important;
     }
     
     div.stButton > button:hover { border: 1px solid #FFD700 !important; box-shadow: 0 0 20px rgba(255, 215, 0, 0.2); }
@@ -35,8 +34,6 @@ st.markdown("""
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
         background: transparent !important; border-bottom: 2px solid #FFD700 !important; border-radius: 0px !important;
     }
-
-    div[data-testid="stMetric"] { background: transparent !important; border: none !important; }
 
     .autobet-card {
         background: rgba(255, 255, 255, 0.03);
@@ -117,66 +114,59 @@ if st.session_state.simulation_done:
         if "ou Nul" in choix and d['t_h'] in choix: prob_ia = d['p_h'] + d['p_n']
         elif "Nul ou" in choix: prob_ia = d['p_n'] + d['p_a']
         elif "ou" in choix: prob_ia = d['p_h'] + d['p_a']
-        
         ev = prob_ia * cote_audit
         if ev >= 1.10: st.success(f"VERDICT : SAFE (Value: {ev:.2f})")
         elif ev >= 0.98: st.warning(f"VERDICT : MID (Value: {ev:.2f})")
         else: st.error(f"VERDICT : ENLÈVE (Value: {ev:.2f})")
 
     st.markdown("<div class='autobet-card'>", unsafe_allow_html=True)
-    st.subheader("🤖 MODE AUTOBET")
+    st.subheader("🤖 MODE AUTOBET AGRESSIF")
     
-    # Ligne 1 : Capital et Cotes simples
-    atb1, atb2, atb3, atb4 = st.columns(4)
-    bankroll = atb1.number_input("Capital (€)", value=1000.0, min_value=10.0)
-    c_h = atb2.number_input(f"Cote {d['t_h']}", value=2.0)
-    c_n = atb3.number_input("Cote NUL", value=3.0)
-    c_a = atb4.number_input(f"Cote {d['t_a']}", value=3.0)
+    at1, at2, at3, at4 = st.columns(4)
+    bankroll = at1.number_input("Capital (€)", value=100.0)
+    c_h, c_n, c_a = at2.number_input(f"Cote {d['t_h']}", value=2.0), at3.number_input("Cote NUL", value=3.0), at4.number_input(f"Cote {d['t_a']}", value=3.0)
 
-    # Ligne 2 : Cotes Doubles Chances
     st.write("---")
-    st.write("**COTES DOUBLES CHANCES**")
-    atb5, atb6, atb7 = st.columns(3)
-    c_hn = atb5.number_input(f"{d['t_h']} ou Nul", value=1.30)
-    c_na = atb6.number_input(f"Nul ou {d['t_a']}", value=1.30)
-    c_ha = atb7.number_input(f"{d['t_h']} ou {d['t_a']}", value=1.30)
+    at5, at6, at7 = st.columns(3)
+    c_hn, c_na, c_ha = at5.number_input(f"{d['t_h']} / Nul", value=1.30), at6.number_input(f"Nul / {d['t_a']}", value=1.30), at7.number_input(f"{d['t_h']} / {d['t_a']}", value=1.30)
 
     options = [
-        {"name": d['t_h'], "prob": d['p_h'], "cote": c_h},
-        {"name": "Nul", "prob": d['p_n'], "cote": c_n},
-        {"name": d['t_a'], "prob": d['p_a'], "cote": c_a},
-        {"name": f"{d['t_h']} ou Nul", "prob": d['p_h'] + d['p_n'], "cote": c_hn},
-        {"name": f"Nul ou {d['t_a']}", "prob": d['p_n'] + d['p_a'], "cote": c_na},
-        {"name": f"{d['t_h']} ou {d['t_a']}", "prob": d['p_h'] + d['p_a'], "cote": c_ha}
+        {"n": d['t_h'], "p": d['p_h'], "c": c_h},
+        {"n": "Nul", "p": d['p_n'], "c": c_n},
+        {"n": d['t_a'], "p": d['p_a'], "c": c_a},
+        {"n": f"{d['t_h']} ou Nul", "p": d['p_h'] + d['p_n'], "c": c_hn},
+        {"n": f"Nul ou {d['t_a']}", "p": d['p_n'] + d['p_a'], "c": c_na},
+        {"n": f"{d['t_h']} ou {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
     ]
 
     best = None
     max_ev = 0
     for o in options:
-        o['ev'] = o['prob'] * o['cote']
-        if o['ev'] > 1.05 and o['ev'] > max_ev:
+        o['ev'] = o['p'] * o['c']
+        if o['ev'] > 1.03 and o['ev'] > max_ev:
             max_ev = o['ev']
             best = o
 
     if best:
-        b = best['cote'] - 1
-        # Kelly plus agressif (30%)
-        kelly = max(0, ((b * best['prob']) - (1 - best['prob'])) / b) * 0.30
-        mise = bankroll * kelly
+        b = best['c'] - 1
+        # Kelly Critérium (Full Kelly à 0.4 pour être agressif)
+        kelly_fraction = ((b * best['p']) - (1 - best['p'])) / b
+        mise_brute = bankroll * max(0, kelly_fraction * 0.4)
         
-        # Application du plafond (10% max) et du plancher (1€ min)
-        mise = max(1.0, min(mise, bankroll * 0.10))
-        
-        st.write(f"### ✅ CONSEIL : PARIER SUR **{best['name'].upper()}**")
-        st.write(f"Mise suggérée : **{mise:.2f}€**")
-        st.write(f"Indice de confiance : **{best['prob']*100:.1f}%** (Espérance de gain : **{best['ev']:.2f}**)")
+        # LOGIQUE AGRESSIVE : Minimum 30% de la bankroll si l'opportunité est bonne
+        # Mais on garde un cap à 25% du capital total pour la survie.
+        mise_finale = max(bankroll * 0.30, mise_brute)
+        mise_finale = min(mise_finale, bankroll * 0.25) # Hard cap à 25%
+        if mise_finale < 1.0: mise_finale = 1.0
+
+        st.write(f"### 🚀 VERDICT AGRESSIF : **{best['n'].upper()}**")
+        st.write(f"Mise à placer : **{mise_finale:.2f}€**")
+        st.write(f"Confiance IA : **{best['p']*100:.1f}%** | EV : **{best['ev']:.2f}**")
     else:
-        st.write("### ❌ AUCUNE OPPORTUNITÉ RENTABLE")
-        st.write("Attends un meilleur match ou de meilleures cotes.")
+        st.write("### ❌ AUCUN VALUE BET. NE PAS PARIER.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("SCORES PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
     s1, s2, s3 = st.columns(3)
     for i in range(3):
