@@ -21,7 +21,6 @@ st.markdown("""
         font-family: 'Monospace', sans-serif;
     }
 
-    /* EFFET GLASSMORPHISM SUR TOUS LES BOUTONS */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.1) !important;
         backdrop-filter: blur(10px) !important;
@@ -41,7 +40,6 @@ st.markdown("""
         box-shadow: 0 0 15px #FFD700;
     }
 
-    /* SUPPRESSION TOTALE DES BLOCS D'INSERTION */
     div[data-baseweb="select"], div[data-baseweb="input"], input {
         background: transparent !important;
         border: none !important;
@@ -53,13 +51,11 @@ st.markdown("""
         border-radius: 0px !important;
     }
 
-    /* NETTOYAGE DES METRICS */
     div[data-testid="stMetric"] {
         background: transparent !important;
         border: none !important;
     }
     
-    /* CARTE AUDIT GLASS */
     .audit-card {
         background: rgba(255, 255, 255, 0.05);
         backdrop-filter: blur(15px);
@@ -152,15 +148,30 @@ if st.session_state.simulation_done:
 
     st.markdown("<div class='audit-card'>", unsafe_allow_html=True)
     st.subheader("AUDIT DU TICKET")
+    
     a_col1, a_col2, a_col3 = st.columns(3)
-    choix = a_col1.selectbox("PARI", [d['t_h'], "Nul", d['t_a'], "1N", "N2", "12"])
+    choix = a_col1.selectbox("PARI", [
+        d['t_h'], 
+        "Nul", 
+        d['t_a'], 
+        f"{d['t_h']} ou Nul", 
+        f"Nul ou {d['t_a']}", 
+        f"{d['t_h']} ou {d['t_a']}"
+    ])
     cote = a_col2.number_input("COTE", value=1.50, step=0.01)
     mise = a_col3.number_input("MISE", value=10)
 
-    prob_ia = (d['p_h'] if choix == d['t_h'] else (d['p_n'] if choix == "Nul" else d['p_a']))
-    if "1N" in choix: prob_ia = d['p_h'] + d['p_n']
-    elif "N2" in choix: prob_ia = d['p_n'] + d['p_a']
-    elif "12" in choix: prob_ia = d['p_h'] + d['p_a']
+    # Bouton avec texte spécifique
+    if st.button("AJUSTER L'AUDIT"):
+        st.toast("Calcul en cours...")
+
+    prob_ia = 0
+    if choix == d['t_h']: prob_ia = d['p_h']
+    elif choix == "Nul": prob_ia = d['p_n']
+    elif choix == d['t_a']: prob_ia = d['p_a']
+    elif "ou Nul" in choix and d['t_h'] in choix: prob_ia = d['p_h'] + d['p_n']
+    elif "Nul ou" in choix: prob_ia = d['p_n'] + d['p_a']
+    elif "ou" in choix: prob_ia = d['p_h'] + d['p_a']
     
     prob_ia /= 100
     ev = prob_ia * cote
@@ -169,7 +180,7 @@ if st.session_state.simulation_done:
     elif ev >= 0.98: st.write("<h2 style='color:#FFD700 !important; text-align:center;'>VERDICT : MID</h2>", unsafe_allow_html=True)
     else: st.write("<h2 style='color:#FF4B4B !important; text-align:center;'>VERDICT : ENLÈVE</h2>", unsafe_allow_html=True)
     
-    st.write(f"<p style='text-align:center;'>Value : {((ev-1)*100):.1f}%</p>", unsafe_allow_html=True)
+    st.write(f"<p style='text-align:center;'>Confiance : {prob_ia*100:.1f}% | Rentabilité : {((ev-1)*100):.1f}%</p>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
