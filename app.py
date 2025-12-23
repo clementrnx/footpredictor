@@ -4,150 +4,155 @@ import numpy as np
 from scipy.stats import poisson
 from datetime import datetime
 
-# --- CONFIGURATION ET STYLE ---
-st.set_page_config(page_title="iTrOz Predictor - L'ALGO", layout="wide")
+# --- CONFIGURATION ET STYLE AURA GOLD ---
+st.set_page_config(page_title="L'ALGO • iTrOz", layout="wide")
 
-st.markdown("""
+# Remplace par ton URL de GIF
+GIF_URL = "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJueGZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxx6U9R6T6M/giphy.gif"
+
+st.markdown(f"""
     <style>
-    .stApp { background-color: #0E1117; }
-    h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
-    .bet-card {
-        background: rgba(255, 255, 255, 0.03);
-        padding: 25px; border-radius: 15px;
-        border: 1px solid rgba(255, 215, 0, 0.2);
-        margin-bottom: 20px;
-    }
-    .verdict-text {
-        font-size: 24px; font-weight: bold; text-align: center; color: #FFD700;
-        border: 2px solid #FFD700; padding: 15px; border-radius: 10px;
-    }
+    .stApp {{
+        background: linear-gradient(rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.9)), url("{GIF_URL}");
+        background-size: cover; background-attachment: fixed;
+    }}
+    h1, h2, h3, p, span, label, div {{ color: #FFD700 !important; font-family: 'Monospace', sans-serif; }}
+    .bet-card {{
+        background: rgba(0, 0, 0, 0.8); padding: 25px; border-radius: 15px;
+        border: 2px solid #FFD700; margin-bottom: 20px;
+    }}
+    .stButton>button {{
+        width: 100%; background-color: #FFD700 !important; color: black !important;
+        font-weight: bold; border: none; height: 50px;
+    }}
+    .stNumberInput input, .stSelectbox div, .stDateInput input, .stSlider div {{
+        background-color: black !important; color: #FFD700 !important; border: 1px solid #FFD700 !important;
+    }}
+    table {{ background-color: rgba(0,0,0,0.8) !important; color: #FFD700 !important; border: 1px solid #FFD700; }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURATION API ---
+# --- CONFIGURATION API & MODES ---
 API_KEY = st.secrets["MY_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
-SEASON = 2025
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1453026279275106355/gbYAwBRntm1FCoqoBTz5lj1SCe2ijyeHHYoe4CFYwpzOw2DO-ozcCsgkK_53HhB-kFGE"
 
-# --- MODES DE L'ALGO ---
 ALGO_MODES = {
-    "SAFE": {"min_ev": 1.15, "kelly": 0.10, "max_legs": 2, "color": "#00FF7F"},
-    "MID SAFE": {"min_ev": 1.10, "kelly": 0.20, "max_legs": 3, "color": "#ADFF2F"},
+    "SAFE": {"min_ev": 1.15, "kelly": 0.10, "max_legs": 2, "color": "#FFD700"},
+    "MID SAFE": {"min_ev": 1.10, "kelly": 0.20, "max_legs": 3, "color": "#FFD700"},
     "MID": {"min_ev": 1.07, "kelly": 0.35, "max_legs": 4, "color": "#FFD700"},
-    "MID AGRESSIF": {"min_ev": 1.04, "kelly": 0.50, "max_legs": 5, "color": "#FF8C00"},
-    "AGRESSIF": {"min_ev": 1.02, "kelly": 0.75, "max_legs": 8, "color": "#FF4500"},
-    "FOU": {"min_ev": 0.98, "kelly": 1.00, "max_legs": 15, "color": "#FF0000"}
+    "MID AGRESSIF": {"min_ev": 1.04, "kelly": 0.50, "max_legs": 5, "color": "#FFD700"},
+    "AGRESSIF": {"min_ev": 1.02, "kelly": 0.75, "max_legs": 8, "color": "#FFD700"},
+    "FOU": {"min_ev": 0.98, "kelly": 1.00, "max_legs": 15, "color": "#FF4B4B"}
 }
 
-# --- FONCTIONS TECHNIQUES ---
-@st.cache_data(ttl=3600)
-def get_api(endpoint, params):
-    try:
-        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=10)
-        return r.json().get('response', [])
-    except: return []
-
-def send_to_discord(ticket_opps, cote, mise, ev, mode_name, color):
-    embed = {
-        "title": f"🏆 TICKET L'ALGO - MODE {mode_name}",
-        "color": int(color.replace("#", ""), 16),
-        "fields": [
-            {"name": "🏟️ SÉLECTIONS", "value": "\n".join([f"**{o['Match']}**\n└ {o['Pari']} (@{o['Cote']})" for o in ticket_opps]), "inline": False},
-            {"name": "📈 COTE", "value": f"**{cote:.2f}**", "inline": True},
-            {"name": "💰 MISE", "value": f"**{mise:.2f}€**", "inline": True},
-            {"name": "🎯 EV", "value": f"**{ev:.2f}**", "inline": True}
-        ],
-        "footer": {"text": "iTrOz Predictor • Scan Automatique"},
-        "timestamp": datetime.now().isoformat()
-    }
-    requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]})
-
-# --- CŒUR DE L'ALGO (DIXON-COLES) ---
-def calculate_probs(lh, la):
-    tau = [-0.13, 0.065, 0.065, 0.13] # Correction Dixon-Coles
+# --- FONCTION MATHÉMATIQUE (DIXON-COLES) ---
+def get_dc_probs(lh, la):
+    tau = [-0.13, 0.065, 0.065, 0.13]
     matrix = np.zeros((10, 10))
     for x in range(10):
         for y in range(10):
-            prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
-            if x==0 and y==0: prob *= (1 + tau[0]*lh*la)
-            elif x==1 and y==0: prob *= (1 + tau[1]*lh)
-            elif x==0 and y==1: prob *= (1 + tau[2]*la)
-            elif x==1 and y==1: prob *= (1 + tau[3])
-            matrix[x, y] = max(prob, 0)
+            p = poisson.pmf(x, lh) * poisson.pmf(y, la)
+            if x==0 and y==0: p *= (1 + tau[0]*lh*la)
+            elif x==1 and y==0: p *= (1 + tau[1]*lh)
+            elif x==0 and y==1: p *= (1 + tau[2]*la)
+            elif x==1 and y==1: p *= (1 + tau[3])
+            matrix[x, y] = max(p, 0)
     matrix /= matrix.sum()
-    
-    return {
-        "p_h": np.sum(np.tril(matrix, -1)),
-        "p_n": np.sum(np.diag(matrix)),
-        "p_a": np.sum(np.triu(matrix, 1)),
-        "p_btts": np.sum(matrix[1:, 1:]),
-        "matrix": matrix
-    }
+    return matrix
 
-# --- INTERFACE PRINCIPALE ---
-st.title("iTrOz Predictor - L'ALGO PRO")
+# --- INTERFACE ---
+st.markdown("<h1 style='text-align:center;'>L'ALGO v3.0 PRO</h1>", unsafe_allow_html=True)
 
-col_l, col_r = st.columns(2)
-with col_l:
-    leagues = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135}
-    l_name = st.selectbox("LIGUE", list(leagues.keys()))
-    l_id = leagues[l_name]
-with col_r:
-    scan_date = st.date_input("DATE DU SCAN", datetime.now())
+with st.sidebar:
+    st.header("⚙️ PARAMÈTRES")
+    bankroll = st.number_input("BANKROLL TOTAL (€)", value=100.0)
+    mode_name = st.select_slider("TEMPÉRAMENT", options=list(ALGO_MODES.keys()), value="MID")
+    threshold = st.slider("SEUIL OVER/UNDER", 0.5, 4.5, 2.5, 1.0)
+    scan_date = st.date_input("DATE", datetime.now())
 
-threshold = st.slider("SEUIL OVER/UNDER", 0.5, 4.5, 2.5, 1.0)
-bankroll = st.number_input("BANKROLL TOTAL (€)", value=100.0)
-mode_name = st.select_slider("TEMPÉRAMENT DE L'ALGO", options=list(ALGO_MODES.keys()), value="MID")
 conf = ALGO_MODES[mode_name]
 
-if st.button("🚀 EXÉCUTER L'ALGO"):
-    with st.spinner("Analyse du marché en cours..."):
-        fixtures = get_api("fixtures", {"league": l_id, "season": SEASON, "date": scan_date.strftime('%Y-%m-%d')})
-        all_opps = []
+if st.button("LANCER LE SCAN DES MARCHÉS"):
+    with st.spinner("L'ALGO analyse les données API Pro..."):
+        # 1. On récupère les matchs de la ligue (Ex: Premier League ID 39)
+        fixtures = requests.get(f"{BASE_URL}fixtures", headers=HEADERS, params={"league": 39, "season": 2025, "date": scan_date.strftime('%Y-%m-%d')}).json().get('response', [])
+        
+        all_opportunities = []
 
         for f in fixtures:
             f_id = f['fixture']['id']
-            # Simulation Lambda (Simplifiée pour l'exemple, à lier à tes stats xG)
-            lh, la = 1.5, 1.2 
-            probs = calculate_probs(lh, la)
+            # On simule ici les lambda (lh, la) via tes stats xG habituelles
+            lh, la = 1.6, 1.2 
+            matrix = get_dc_probs(lh, la)
             
-            # Récupération Cotes
-            odds_res = get_api("odds", {"fixture": f_id})
+            # Calcul des probabilités par catégorie
+            p_h = np.sum(np.tril(matrix, -1))
+            p_n = np.sum(np.diag(matrix))
+            p_a = np.sum(np.triu(matrix, 1))
+            p_1n, p_n2, p_12 = p_h + p_n, p_n + p_a, p_h + p_a
+            p_btts = np.sum(matrix[1:, 1:])
+            p_over = np.sum([matrix[x,y] for x in range(10) for y in range(10) if x+y > threshold])
+
+            # Récupération des cotes réelles
+            odds_res = requests.get(f"{BASE_URL}odds", headers=HEADERS, params={"fixture": f_id}).json().get('response', [])
             if not odds_res: continue
             
-            bookie_bets = odds_res[0]['bookmakers'][0]['bets']
-            
-            # Mapping des marchés pour L'ALGO
-            for bet in bookie_bets:
+            # Extraction des cotes et calcul de l'EV (Expected Value)
+            for bet in odds_res[0]['bookmakers'][0]['bets']:
+                match_name = f"{f['teams']['home']['name']} - {f['teams']['away']['name']}"
+                
+                # Catégorie 1N2
                 if bet['name'] == "Match Winner":
                     for v in bet['values']:
-                        p = probs['p_h'] if v['value']=="Home" else (probs['p_n'] if v['value']=="Draw" else probs['p_a'])
-                        all_opps.append({"Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}", "Pari": v['value'], "Cote": float(v['odd']), "Proba IA": p, "EV": p * float(v['odd'])})
-                if bet['name'] == "Both Teams Score" and v['value'] == "Yes":
-                    p = probs['p_btts']
-                    all_opps.append({"Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}", "Pari": "BTTS Oui", "Cote": float(v['odd']), "Proba IA": p, "EV": p * float(v['odd'])})
+                        p = p_h if v['value']=="Home" else (p_n if v['value']=="Draw" else p_a)
+                        all_opportunities.append({"Match": match_name, "Pari": v['value'], "Cote": float(v['odd']), "Proba": p, "EV": p * float(v['odd'])})
+                
+                # Catégorie BTTS
+                if bet['name'] == "Both Teams Score":
+                    for v in bet['values']:
+                        if v['value'] == "Yes":
+                            all_opportunities.append({"Match": match_name, "Pari": "BTTS OUI", "Cote": float(v['odd']), "Proba": p_btts, "EV": p_btts * float(v['odd'])})
 
-        # Filtrage et Ticket
-        valid_opps = sorted([o for o in all_opps if o['EV'] >= conf['min_ev']], key=lambda x: x['EV'], reverse=True)[:conf['max_legs']]
-        
+                # Catégorie Over/Under
+                if bet['name'] == "Goals Over/Under":
+                    for v in bet['values']:
+                        if v['value'] == f"Over {threshold}":
+                            all_opportunities.append({"Match": match_name, "Pari": f"Over {threshold}", "Cote": float(v['odd']), "Proba": p_over, "EV": p_over * float(v['odd'])})
+
+        # --- FILTRAGE ET TICKET ---
+        valid_opps = sorted([o for o in all_opportunities if o['EV'] >= conf['min_ev']], key=lambda x: x['EV'], reverse=True)[:conf['max_legs']]
+
         if valid_opps:
             cote_t = np.prod([o['Cote'] for o in valid_opps])
-            prob_t = np.prod([o['Proba IA'] for o in valid_opps])
+            prob_t = np.prod([o['Proba'] for o in valid_opps])
             ev_t = cote_t * prob_t
             
-            # Kelly
+            # Kelly Criterion
             b = cote_t - 1
             k_mise = ((b * prob_t - (1 - prob_t)) / b) * conf['kelly'] if b > 0 else 0
             mise_f = max(0, bankroll * k_mise)
 
-            st.markdown(f"<div class='verdict-text'>TICKET GÉNÉRÉ : {cote_t:.2f} (@{mise_f:.2f}€)</div>", unsafe_allow_html=True)
+            # Affichage UI
+            st.markdown(f"""
+                <div class="bet-card">
+                    <h2 style="text-align:center;">🎫 TICKET GÉNÉRÉ : MODE {mode_name}</h2>
+                    <p style="text-align:center; font-size:25px;">Cote Totale : <b>{cote_t:.2f}</b> | Mise : <b>{mise_f:.2f}€</b></p>
+                </div>
+            """, unsafe_allow_html=True)
             st.table(valid_opps)
-            
-            send_to_discord(valid_opps, cote_t, mise_f, ev_t, mode_name, conf['color'])
-            st.toast("Signal transmis à Discord !")
-        else:
-            st.error("Aucune opportunité détectée par L'ALGO pour ce mode.")
 
-st.markdown("<div style='text-align:center; margin-top:50px; opacity:0.5;'>iTrOz Predictor v3.0 - L'ALGO Propriétaire</div>", unsafe_allow_html=True)
+            # Envoi Webhook Discord
+            embed = {
+                "title": f"🔱 SIGNAL L'ALGO - {mode_name}",
+                "color": 16766464,
+                "fields": [
+                    {"name": "📑 MATCHS", "value": "\n".join([f"• {o['Match']} : `{o['Pari']}` (@{o['Cote']})" for o in valid_opps])},
+                    {"name": "📊 STATS", "value": f"Cote: **{cote_t:.2f}** | Mise: **{mise_f:.2f}€** | EV: **{ev_t:.2f}**"}
+                ]
+            }
+            requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]})
+            st.success("SIGNAL ENVOYÉ SUR DISCORD")
+        else:
+            st.warning("L'ALGO n'a trouvé aucune opportunité rentable.")
