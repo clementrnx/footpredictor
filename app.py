@@ -25,6 +25,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- CONFIG API ---
 API_KEY = st.secrets["MY_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
@@ -32,7 +33,7 @@ SEASON = 2025
 
 LEAGUES_DICT = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135, "Bundesliga": 78}
 
-# --- LOGIQUE MATHÉMATIQUE ---
+# --- MOTEUR MATHÉMATIQUE ---
 def calculate_perfect_probs(lh, la):
     rho = -0.11
     matrix = np.zeros((10, 10))
@@ -51,7 +52,7 @@ def calculate_perfect_probs(lh, la):
     return {
         "p_h": p_h, "p_n": p_n, "p_a": p_a, 
         "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, 
-        "p_btts": p_btts, "p_nobtts": 1 - p_btts, "matrix": matrix
+        "p_btts": p_btts, "p_nobtts": 1.0 - p_btts, "matrix": matrix
     }
 
 def get_optimized_lambda(team_id, league_id, scope_overall):
@@ -100,27 +101,20 @@ with tab1:
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
-        # AUDIT
         st.subheader("🕵️ AUDIT DU PARI")
         ac1, ac2 = st.columns(2)
         u_bet = ac1.selectbox("VOTRE SÉLECTION", [th, ta, "Match Nul", f"{th} ou Nul", f"Nul ou {ta}", f"{th} ou {ta}", "Les deux équipes marquent", "Une ou aucune équipe marque"])
         u_odd = ac2.number_input("COTE DU BOOKMAKER", value=1.50, step=0.01)
         
-        p_map = {
-            th: r['p_h'], ta: r['p_a'], "Match Nul": r['p_n'], 
-            f"{th} ou Nul": r['p_1n'], f"Nul ou {ta}": r['p_n2'], f"{th} ou {ta}": r['p_12'], 
-            "Les deux équipes marquent": r['p_btts'], "Une ou aucune équipe marque": r['p_nobtts']
-        }
+        p_map = {th: r['p_h'], ta: r['p_a'], "Match Nul": r['p_n'], f"{th} ou Nul": r['p_1n'], f"Nul ou {ta}": r['p_n2'], f"{th} ou {ta}": r['p_12'], "Les deux équipes marquent": r['p_btts'], "Une ou aucune équipe marque": r['p_nobtts']}
         ev = p_map[u_bet] * u_odd
         st.markdown(f"<div class='verdict-box'>EXPECTED VALUE : {ev:.4f}<br>STATUT : {'✅ VALIDE' if ev > 1.05 else '❌ EV NÉGATIVE'}</div>", unsafe_allow_html=True)
 
-        # BET
         st.subheader("💰 MODULE BET (COMPARATIF)")
         b1, b2, b3 = st.columns(3)
         c_1 = b1.number_input(f"Cote {th}", value=1.0)
         c_n = b2.number_input("Cote Nul", value=1.0)
         c_2 = b3.number_input(f"Cote {ta}", value=1.0)
-        
         b4, b5, b6, b7, b8 = st.columns(5)
         c_1n = b4.number_input(f"{th}/N", value=1.0)
         c_n2 = b5.number_input(f"N/{ta}", value=1.0)
@@ -128,7 +122,6 @@ with tab1:
         c_btts = b7.number_input("BTTS OUI", value=1.0)
         c_nobtts = b8.number_input("BTTS NON", value=1.0)
 
-        # KELLY
         cap = st.number_input("BANKROLL (€)", value=100.0)
         k = max(0, (((u_odd-1) * p_map[u_bet]) - (1 - p_map[u_bet])) / (u_odd-1)) if u_odd > 1 else 0
         st.success(f"MISE OPTIMISÉE : **{(cap * k * 0.2):.2f} €**")
@@ -140,9 +133,12 @@ with tab1:
 
 with tab2:
     st.subheader("🚀 GÉNÉRATEUR DE TICKETS")
-    gc1, gc2 = st.columns(2)
+    gc1, gc2, gc3 = st.columns(3)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
-    scope_scan = gc2.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
+    scope_scan = gc3.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    
+    selected_markets = st.multiselect("MARCHÉS À ANALYSER", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
     risk_mode = st.select_slider("MODE DE RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
     risk_cfg = {"SAFE": {"p": 0.82, "ev": 1.02, "legs": 2}, "MID-SAFE": {"p": 0.74, "ev": 1.05, "legs": 3}, "MID": {"p": 0.64, "ev": 1.08, "legs": 4}, "MID-AGGRESSIF": {"p": 0.52, "ev": 1.12, "legs": 5}, "AGGRESSIF": {"p": 0.42, "ev": 1.15, "legs": 7}}[risk_mode]
     
@@ -150,21 +146,21 @@ with tab2:
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
-            fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": datetime.now().strftime('%Y-%m-%d')})
+            fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": d_scan.strftime('%Y-%m-%d')})
             for f in fixtures:
                 lh = get_optimized_lambda(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL") * 1.08
                 la = get_optimized_lambda(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL") * 0.92
                 pr = calculate_perfect_probs(lh, la)
-                
                 h_name, a_name = f['teams']['home']['name'], f['teams']['away']['name']
-                tests = [
-                    (h_name, pr['p_h'], "Match Winner", "Home"),
-                    (a_name, pr['p_a'], "Match Winner", "Away"),
-                    (f"{h_name} ou Nul", pr['p_1n'], "Double Chance", "Home/Draw"),
-                    (f"Nul ou {a_name}", pr['p_n2'], "Double Chance", "Draw/Away"),
-                    ("Les deux marquent", pr['p_btts'], "Both Teams Score", "Yes"),
-                    ("Pas de BTTS", pr['p_nobtts'], "Both Teams Score", "No")
-                ]
+                
+                tests = []
+                if "ISSUE SIMPLE" in selected_markets:
+                    tests += [(h_name, pr['p_h'], "Match Winner", "Home"), (a_name, pr['p_a'], "Match Winner", "Away")]
+                if "DOUBLE CHANCE" in selected_markets:
+                    tests += [(f"{h_name}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_name}", pr['p_n2'], "Double Chance", "Draw/Away")]
+                if "BTTS (OUI/NON)" in selected_markets:
+                    tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
+
                 for lbl, p, m_n, m_v in tests:
                     if p >= risk_cfg['p']:
                         odds = get_api("odds", {"fixture": f['fixture']['id']})
@@ -175,12 +171,13 @@ with tab2:
                                         if o['value'] == m_v:
                                             ct = float(o['odd'])
                                             if (p * ct) >= risk_cfg['ev']:
-                                                opps.append({"MATCH": f"{h_name}-{a_name}", "PARI": lbl, "COTE": ct, "PROBA": f"{p*100:.1f}%"})
+                                                opps.append({"MATCH": f"{h_name}-{a_name}", "PARI": lbl, "COTE": ct, "PROBA": f"{p*100:.1f}%", "VALUE": p*ct})
         
-        final_ticket = sorted(opps, key=lambda x: float(x['PROBA'].strip('%')), reverse=True)[:risk_cfg['legs']]
+        final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
         if final_ticket:
-            st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{np.prod([x['COTE'] for x in final_ticket]):.2f}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='verdict-box'>TICKET GÉNÉRÉ | COTE : @{np.prod([x['COTE'] for x in final_ticket]):.2f}</div>", unsafe_allow_html=True)
             st.table(final_ticket)
+        else: st.error("Aucune opportunité détectée pour cette configuration.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
