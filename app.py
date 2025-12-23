@@ -1,203 +1,177 @@
 import streamlit as st
 import requests
 import numpy as np
+import pandas as pd
 from scipy.stats import poisson
-from datetime import datetime, timedelta
 
-# --- CONFIGURATION ET STYLE ORIGINAL RESTAURÉ ---
-st.set_page_config(page_title="iTrOz Predictor", layout="wide")
+# --- CONFIGURATION PAGE ---
+st.set_page_config(page_title="iTrOz Predictor Master", layout="wide")
 
+# --- STYLE CSS (JAUNE, NOIR, GLASSMORPHISM, GIF BACKGROUND) ---
 st.markdown("""
     <style>
     @keyframes subtleDistort {
-        0% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
-        50% { transform: scale(1.02) contrast(1.1); filter: hue-rotate(2deg) brightness(1.1); }
-        100% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
+        0% { filter: hue-rotate(0deg) brightness(1); }
+        50% { filter: hue-rotate(2deg) brightness(1.1); }
+        100% { filter: hue-rotate(0deg) brightness(1); }
     }
 
     .stApp {
         background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
         background-size: cover;
         background-attachment: fixed;
-        animation: subtleDistort 10s infinite ease-in-out;
     }
 
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.85); position: relative; z-index: 2; }
+    /* Overlay sombre pour lisibilité */
+    .stApp > div:first-child { 
+        background-color: rgba(0, 0, 0, 0.9); 
+    }
     
-    h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; letter-spacing: 2px; }
+    /* Global Text */
+    h1, h2, h3, p, span, label, .stMetric div { 
+        color: #FFD700 !important; 
+        font-family: 'Monospace', sans-serif !important; 
+        letter-spacing: 1px;
+    }
 
-    /* Tes boutons dorés stylés */
-    div.stButton > button {
-        background: rgba(255, 215, 0, 0.03) !important;
-        backdrop-filter: blur(25px) !important;
-        -webkit-backdrop-filter: blur(25px) !important;
+    /* Glassmorphism Containers */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.03) !important;
+        backdrop-filter: blur(15px) !important;
+        -webkit-backdrop-filter: blur(15px) !important;
         border: 1px solid rgba(255, 215, 0, 0.2) !important;
-        color: #FFD700 !important;
         border-radius: 15px !important;
-        height: 60px !important;
-        width: 100% !important;
-        font-weight: 200 !important;
+        padding: 25px;
+        margin-bottom: 20px;
+    }
+
+    /* Inputs & Selectbox */
+    div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input {
+        background-color: rgba(0, 0, 0, 0.6) !important;
+        border: 1px solid rgba(255, 215, 0, 0.3) !important;
+        color: #FFD700 !important;
+    }
+
+    /* Styled Buttons */
+    div.stButton > button {
+        background: rgba(255, 215, 0, 0.1) !important;
+        border: 1px solid #FFD700 !important;
+        color: #FFD700 !important;
+        border-radius: 10px !important;
         text-transform: uppercase !important;
-        letter-spacing: 6px !important;
-        transition: 0.6s all ease-in-out;
+        font-weight: bold !important;
+        transition: 0.4s all;
+        width: 100%;
     }
     
     div.stButton > button:hover { 
-        background: rgba(255, 215, 0, 0.1) !important;
-        border: 1px solid rgba(255, 215, 0, 0.6) !important;
-        letter-spacing: 8px !important;
-        box-shadow: 0 0 40px rgba(255, 215, 0, 0.15);
+        background: #FFD700 !important; 
+        color: #000 !important;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
     }
 
-    div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        backdrop-filter: blur(12px) !important;
-        border: 0.5px solid rgba(255, 215, 0, 0.15) !important;
-        border-radius: 10px !important;
-        color: #FFD700 !important;
-    }
-
-    .verdict-text {
-        font-size: 26px; font-weight: 900; text-align: center; padding: 30px;
-        letter-spacing: 4px; text-transform: uppercase;
-        border-top: 1px solid rgba(255, 215, 0, 0.1);
-        border-bottom: 1px solid rgba(255, 215, 0, 0.1);
-        margin: 15px 0;
-    }
-
-    .bet-card {
-        background: rgba(255, 255, 255, 0.02);
-        padding: 30px; border-radius: 20px;
-        border: 1px solid rgba(255, 215, 0, 0.05);
-        margin-bottom: 40px;
+    /* Table & Dataframe Customization */
+    .stDataFrame, [data-testid="stTable"] {
+        background: rgba(0,0,0,0.5) !important;
+        border: 1px solid rgba(255, 215, 0, 0.2);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# API Config
-API_KEY = st.secrets["MY_API_KEY"]
-BASE_URL = "https://v3.football.api-sports.io/"
+# --- LOGIQUE API ---
+API_KEY = st.secrets.get("MY_API_KEY", "")
 HEADERS = {'x-apisports-key': API_KEY}
+BASE_URL = "https://v3.football.api-sports.io/"
 SEASON = 2025
 
 @st.cache_data(ttl=3600)
-def get_api(endpoint, params):
+def call_api(endpoint, params):
     try:
         r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
         return r.json().get('response', [])
     except: return []
 
-@st.cache_data(ttl=3600)
-def get_league_context(league_id, season):
-    return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_home_conceded': 1.2, 'avg_away_conceded': 1.5, 'avg_total': 2.7}
+def get_stats(team_id, league_id):
+    f = call_api("fixtures", {"team": team_id, "league": league_id, "season": SEASON, "last": 10})
+    if not f: return 1.3, 0.5
+    scored = [float(m['teams']['home' if m['teams']['home']['id'] == team_id else 'away'].get('xg') or m['goals']['home' if m['teams']['home']['id'] == team_id else 'away'] or 0) for m in f]
+    return np.mean(scored), np.std(scored)
 
-@st.cache_data(ttl=1800)
-def get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=False):
-    params = {"team": team_id, "season": season, "last": 15} if use_global else {"team": team_id, "league": league_id, "season": season, "last": 10}
-    fixtures = get_api("fixtures", params)
-    if not fixtures: return None
-    
-    total_w, xg_f, xg_a = 0, 0, 0
-    for idx, match in enumerate(fixtures):
-        if match['fixture']['status']['short'] != 'FT': continue
-        weight, home = 0.9 ** idx, match['teams']['home']['id'] == team_id
-        if (is_home and not home) or (not is_home and home): continue
-        xg_f += float(match['teams']['home' if home else 'away'].get('xg') or match['goals']['home' if home else 'away'] or 0) * weight
-        xg_a += float(match['teams']['away' if home else 'home'].get('xg') or match['goals']['away' if home else 'home'] or 0) * weight
-        total_w += weight
-    return {'xg_for': xg_f/total_w, 'xg_against': xg_a/total_w} if total_w > 0 else None
+# --- INTERFACE ---
+st.markdown("<h1 style='text-align:center; letter-spacing:10px;'>ITROZ PREDICTOR</h1>", unsafe_allow_html=True)
 
-# --- APP ---
-st.title("ITROZ PREDICTOR")
+# Barre Latérale / Settings
+with st.sidebar:
+    st.markdown("### CONFIGURATION")
+    bankroll = st.number_input("CAPITAL TOTAL", value=100.0)
+    st.markdown("### MODE DE PARI")
+    risk_mode = st.radio("PROFIL", ["🛡️ SAFE", "⚖️ MID", "🔥 JOUEUR"], label_visibility="collapsed")
+    risk_map = {"🛡️ SAFE": 0.1, "⚖️ MID": 0.25, "🔥 JOUEUR": 0.5}
 
-col_toggle, col_league = st.columns([1, 3])
-with col_toggle:
-    use_global_stats = st.toggle("📊 MODE GLOBAL", value=False)
+# Sélection Match
+leagues = {"Premier League": 39, "Ligue 1": 61, "La Liga": 140, "Bundesliga": 78, "Serie A": 135}
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+col_l, col_h, col_a = st.columns(3)
+l_name = col_l.selectbox("LIGUE", list(leagues.keys()))
+league_id = leagues[l_name]
 
-leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
-with col_league:
-    l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
+teams_data = call_api("teams", {"league": league_id, "season": SEASON})
+team_map = {t['team']['name']: t['team']['id'] for t in teams_data}
 
-teams_res = get_api("teams", {"league": leagues[l_name], "season": SEASON})
-teams = {t['team']['name']: t['team']['id'] for t in teams_res}
+t_h = col_h.selectbox("DOMICILE", sorted(team_map.keys()))
+t_a = col_a.selectbox("EXTERIEUR", sorted(team_map.keys()), index=1)
+st.markdown("</div>", unsafe_allow_html=True)
 
-if teams:
-    c1, c2 = st.columns(2)
-    t_h = c1.selectbox("DOMICILE", sorted(teams.keys()), index=0)
-    t_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), index=1)
+if st.button("LANCER L'ANALYSE"):
+    with st.spinner("CALCUL EN COURS..."):
+        # Stats & Modélisation
+        m_h, s_h = get_stats(team_map[t_h], league_id)
+        m_a, s_a = get_stats(team_map[t_a], league_id)
+        
+        lh, la = m_h * (m_a/1.3), m_a * (m_h/1.3)
+        matrix = np.outer(poisson.pmf(np.arange(6), lh), poisson.pmf(np.arange(6), la))
+        matrix /= matrix.sum()
+        
+        p_h, p_n, p_a = np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
 
-    if st.button("LANCER LA PRÉDICTION"):
-        with st.spinner("ANALYSE XG..."):
-            ctx = get_league_context(leagues[l_name], SEASON)
-            s_h = get_weighted_xg_stats(teams[t_h], leagues[l_name], SEASON, True, use_global_stats)
-            s_a = get_weighted_xg_stats(teams[t_a], leagues[l_name], SEASON, False, use_global_stats)
-            
-            if s_h and s_a:
-                lh = ctx['avg_home'] * (s_h['xg_for'] / ctx['avg_home']) * (s_a['xg_against'] / ctx['avg_home_conceded'])
-                la = ctx['avg_away'] * (s_a['xg_for'] / ctx['avg_away']) * (s_h['xg_against'] / ctx['avg_away_conceded'])
-                matrix = np.zeros((8, 8))
-                for x in range(8):
-                    for y in range(8):
-                        prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
-                        if x==0 and y==0: prob *= 0.87
-                        matrix[x, y] = prob
-                matrix /= matrix.sum()
-                st.session_state.data = {'p_h': np.sum(np.tril(matrix, -1)), 'p_n': np.sum(np.diag(matrix)), 'p_a': np.sum(np.triu(matrix, 1)), 'matrix': matrix, 't_h': t_h, 't_a': t_a, 'lh': lh, 'la': la}
-                st.session_state.simulation_done = True
+        # Résultats Principaux
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        res1, res2, res3 = st.columns(3)
+        res1.metric(t_h.upper(), f"{p_h*100:.1f}%")
+        res2.metric("NUL", f"{p_n*100:.1f}%")
+        res3.metric(t_a.upper(), f"{p_a*100:.1f}%")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-if st.session_state.get('simulation_done'):
-    d = st.session_state.data
-    st.write("---")
-    m1, m2, m3 = st.columns(3)
-    m1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
-    m2.metric("NUL", f"{d['p_n']*100:.1f}%")
-    m3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
+        # Value & Kelly
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("VALUE ET MISE")
+        vc1, vc2, vc3 = st.columns(3)
+        c_h = vc1.number_input(f"COTE {t_h}", value=2.0)
+        c_n = vc2.number_input("COTE NUL", value=3.2)
+        c_a = vc3.number_input(f"COTE {t_a}", value=3.5)
+        
+        bets = [(t_h, p_h, c_h), ("NUL", p_n, c_n), (t_a, p_a, c_a)]
+        summary = []
+        for lab, p, c in bets:
+            ev = p * c
+            if ev > 1.05:
+                k = ((c-1)*p - (1-p)) / (c-1)
+                mise = max(0, bankroll * k * risk_map[risk_mode])
+                summary.append({"PARI": lab, "PROBABILITE": f"{p*100:.1f}%", "VALUE": f"{ev:.2f}", "MISE": f"{mise:.2f}€"})
+        
+        if summary: st.table(pd.DataFrame(summary))
+        else: st.write("AUCUNE VALUE DETECTEE")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.subheader("🤖 CONFIGURATION BET")
-    if 'risk_mode' not in st.session_state: st.session_state.risk_mode = "SAFE"
-    
-    # Sélecteur de profil stylé
-    rm1, rm2, rm3 = st.columns(3)
-    with rm1: 
-        if st.button("🛡️ SAFE"): st.session_state.risk_mode = "SAFE"
-    with rm2: 
-        if st.button("⚖️ MID"): st.session_state.risk_mode = "MID"
-    with rm3: 
-        if st.button("🔥 JOUEUR"): st.session_state.risk_mode = "JOUEUR"
+        # Scores Exacts
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("SCORES EXACTS")
+        flat = matrix.flatten()
+        top3 = np.argsort(flat)[-3:][::-1]
+        sc_cols = st.columns(3)
+        for i, idx in enumerate(top3):
+            h, a = divmod(idx, 6)
+            sc_cols[i].metric(f"{h} - {a}", f"{matrix[h,a]*100:.1f}%")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    conf = {"SAFE": {"s": 1.05, "k": 0.25, "m": 0.05}, "MID": {"s": 1.02, "k": 0.50, "m": 0.15}, "JOUEUR": {"s": 1.001, "k": 1.0, "m": 0.40}}[st.session_state.risk_mode]
-
-    st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
-    b_c1, b_c2, b_c3, b_c4 = st.columns(4)
-    bankroll = b_c1.number_input("CAPITAL TOTAL (€)", value=100.0)
-    c_h, c_n, c_a = b_c2.number_input(f"COTE {d['t_h']}", value=2.0), b_c3.number_input("COTE NUL", value=3.0), b_c4.number_input(f"COTE {d['t_a']}", value=3.0)
-
-    opts = [{"n": d['t_h'], "p": d['p_h'], "c": c_h}, {"n": "NUL", "p": d['p_n'], "c": c_n}, {"n": d['t_a'], "p": d['p_a'], "c": c_a}]
-    valides = [o for o in opts if (o['p'] * o['c']) >= conf['s']]
-    
-    if valides:
-        best = max(valides, key=lambda x: x['p'] * x['c'])
-        f_k = ((best['c']-1)*best['p'] - (1-best['p'])) / (best['c']-1)
-        mise = min(bankroll * f_k * conf['k'], bankroll * conf['m'])
-        st.markdown(f"<div class='verdict-text'>{st.session_state.risk_mode} : {best['n']} | MISE : {max(0, mise):.2f}€</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Suite de ton interface originale
-    st.subheader("🔍 AUDIT DU TICKET")
-    aud1, aud2 = st.columns(2)
-    aud_choix = aud1.selectbox("VOTRE PARI", [d['t_h'], "Nul", d['t_a']])
-    aud_cote = aud2.number_input("VOTRE COTE", value=1.50)
-    p_aud = d['p_h'] if aud_choix == d['t_h'] else (d['p_n'] if aud_choix == "Nul" else d['p_a'])
-    st.markdown(f"<div class='verdict-text'>AUDIT : {'SAFE' if p_aud*aud_cote >= 1.10 else 'MID'} (EV: {p_aud*aud_cote:.2f})</div>", unsafe_allow_html=True)
-
-    st.subheader("SCORES PROBABLES")
-    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-5:][::-1], d['matrix'].shape)
-    cols = st.columns(5)
-    for i in range(5):
-        with cols[i]:
-            st.write(f"**{idx[0][i]} - {idx[1][i]}**")
-            st.write(f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
-
-st.markdown("<div style='text-align:center; padding:20px; opacity:0.6;'>DÉVELOPPÉ PAR ITROZ</div>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; opacity:0.4; letter-spacing:3px;'>ITROZ MASTER EDITION</p>", unsafe_allow_html=True)
