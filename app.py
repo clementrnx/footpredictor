@@ -2,139 +2,190 @@ import streamlit as st
 import requests
 import numpy as np
 from scipy.stats import poisson
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 
-# --- CONFIGURATION CLEMENTRNXX PREDICTOR V14.0 ---
-st.set_page_config(page_title="Clementrnxx Predictor V14.0", layout="wide")
+# --- CONFIGURATION CLEMENTRNXX PREDICTOR V6.0 ---
+st.set_page_config(page_title="Clementrnxx Predictor V6.0", layout="wide")
 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1453026279275106355/gbYAwBRntm1FCoqoBTz5lj1SCe2ijyeHHYoe4CFYwpzOw2DO-ozcCsgkK_53HhB-kFGE"
 
 st.markdown("""
     <style>
     .stApp { background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif"); background-size: cover; background-attachment: fixed; }
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.96); }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.93); }
     h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
-    .section-box { border: 2px solid #FFD700; padding: 20px; border-radius: 15px; background: rgba(0,0,0,0.85); margin-bottom: 25px; }
-    .audit-gold { border: 3px solid #FFD700; background: linear-gradient(145deg, #1a1a1a, #000); padding: 30px; border-radius: 15px; text-align: center; }
-    .stake-val { font-size: 3rem; color: #00FF00 !important; font-weight: bold; text-shadow: 0 0 15px #00FF00; }
-    div.stButton > button { background: #FFD700 !important; color: black !important; font-weight: 900; border-radius: 10px; height: 3.5em; width: 100%; border: 2px solid #BF953F !important; }
+    div.stButton > button {
+        background: rgba(255, 215, 0, 0.1) !important; backdrop-filter: blur(10px);
+        border: 2px solid #FFD700 !important; color: #FFD700 !important;
+        border-radius: 15px !important; font-weight: 900; transition: 0.4s; width: 100%;
+    }
+    .verdict-box { border: 2px solid #FFD700; padding: 20px; border-radius: 15px; background: rgba(0,0,0,0.8); margin-bottom: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIG ET STRATÉGIES ---
+# --- API CONFIG ---
+API_KEY = st.secrets["MY_API_KEY"]
+BASE_URL = "https://v3.football.api-sports.io/"
+HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 LEAGUES_DICT = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135, "Bundesliga": 78}
 
-MODES_RISQUE = {
-    "ULTRA-SAFE": {"fraction": 0.02, "label": "🛡️ Ultra-Prudent"},
-    "SAFE": {"fraction": 0.05, "label": "✅ Sécurisé"},
-    "MID-SAFE": {"fraction": 0.10, "label": "⚖️ Équilibré"},
-    "MID": {"fraction": 0.20, "label": "⚡ Standard"},
-    "MID-AGGRESSIF": {"fraction": 0.40, "label": "🔥 Agressif"},
-    "ALL-IN (KELLY 100%)": {"fraction": 1.00, "label": "🚀 Risque Maximum"}
+RISK_LEVELS = {
+    "ULTRA-SAFE": {"elite_min": 0.85, "p_min": 0.85},
+    "SAFE": {"elite_min": 0.70, "p_min": 0.75},
+    "MID-SAFE": {"elite_min": 0.60, "p_min": 0.65},
+    "MID": {"elite_min": 0.50, "p_min": 0.55},
+    "MID-AGGRESSIF": {"elite_min": 0.40, "p_min": 0.45},
+    "JACKPOT": {"elite_min": 0.25, "p_min": 0.35}
 }
 
-# --- FONCTIONS ---
-def calculate_probs(lh, la):
-    matrix = np.zeros((10, 10))
-    for x in range(10):
-        for y in range(10): matrix[x, y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
-    matrix /= matrix.sum()
-    return {
-        "Home": np.sum(np.tril(matrix, -1)), "Draw": np.sum(np.diag(matrix)), "Away": np.sum(np.triu(matrix, 1)),
-        "1N": np.sum(np.tril(matrix, -1)) + np.sum(np.diag(matrix)),
-        "N2": np.sum(np.diag(matrix)) + np.sum(np.triu(matrix, 1)),
-        "12": np.sum(np.tril(matrix, -1)) + np.sum(np.triu(matrix, 1)),
-        "BTTS_Yes": np.sum(matrix[1:, 1:]), "BTTS_No": 1.0 - np.sum(matrix[1:, 1:])
-    }
-
+# --- FUNCTIONS ---
 @st.cache_data(ttl=3600)
 def get_api(endpoint, params):
     try:
-        API_KEY = st.secrets["MY_API_KEY"]
-        HEADERS = {'x-apisports-key': API_KEY}
-        return requests.get(f"https://v3.football.api-sports.io/{endpoint}", headers=HEADERS, params=params, timeout=12).json().get('response', [])
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
+        return r.json().get('response', [])
     except: return []
 
-# --- INTERFACE PRINCIPALE ---
-st.title("🏆 CLEMENTRNXX PREDICTOR V14 - TOTAL CONTROL")
+def get_team_stats(team_id, league_id, scope_overall, last_n=15):
+    params = {"team": team_id, "season": SEASON, "last": last_n}
+    if not scope_overall: params["league"] = league_id
+    f = get_api("fixtures", params)
+    if not f: return 1.3, 1.3
+    scored = [m['goals']['home'] if m['teams']['home']['id'] == team_id else m['goals']['away'] for m in f if m['goals']['home'] is not None]
+    conceded = [m['goals']['away'] if m['teams']['home']['id'] == team_id else m['goals']['home'] for m in f if m['goals']['home'] is not None]
+    if not scored: return 1.3, 1.3
+    weights = [0.96 ** i for i in range(len(scored))]
+    return sum(s * w for s, w in zip(scored, weights)) / sum(weights), sum(c * w for c, w in zip(conceded, weights)) / sum(weights)
 
-# Zone de gestion globale (remplace la barre latérale)
-with st.container():
-    st.markdown("<div class='section-box'>", unsafe_allow_html=True)
-    st.subheader("💰 GESTION DE LA SESSION")
-    g1, g2, g3 = st.columns(3)
-    capital = g1.number_input("VOTRE CAPITAL DISPONIBLE (€)", 10.0, 1000000.0, 1000.0)
-    strat = g2.selectbox("MODE DE RISQUE (GESTION DE MISE)", list(MODES_RISQUE.keys()), index=3)
-    scope_global = g3.select_slider("QUALITÉ DES DONNÉES", ["LEAGUE ONLY", "OVER-ALL"], "OVER-ALL")
-    st.markdown("</div>", unsafe_allow_html=True)
+def calculate_perfect_probs(lh, la):
+    matrix = np.zeros((10, 10))
+    for x in range(10):
+        for y in range(10):
+            matrix[x, y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
+    matrix /= matrix.sum()
+    return {
+        "p_h": np.sum(np.tril(matrix, -1)), "p_n": np.sum(np.diag(matrix)), "p_a": np.sum(np.triu(matrix, 1)),
+        "p_1n": np.sum(np.tril(matrix, -1)) + np.sum(np.diag(matrix)),
+        "p_n2": np.sum(np.diag(matrix)) + np.sum(np.triu(matrix, 1)),
+        "p_12": np.sum(np.tril(matrix, -1)) + np.sum(np.triu(matrix, 1)),
+        "p_btts": np.sum(matrix[1:, 1:]), "p_nobtts": 1.0 - np.sum(matrix[1:, 1:])
+    }
 
-tab1, tab2 = st.tabs(["🎯 ANALYSEUR 1VS1 (ANALYSE/BET/AUDIT)", "📡 GÉNÉRATEUR ELITE (MULTI-DATES)"])
+# --- UI ---
+tab1, tab2, tab3 = st.tabs(["🎯 ANALYSE 1VS1", "📡 SCANNER ÉLITE", "📊 CLASSEMENTS"])
 
 with tab1:
-    # --- 1. CONFIGURATION ---
-    st.markdown("<div class='section-box'><h3>🛠 CONFIGURATION DU MATCH</h3>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([2, 2, 1])
-    l_name = c1.selectbox("CHOISIR LA LIGUE", list(LEAGUES_DICT.keys()), key="1v1_l")
-    n_depth = c3.number_input("MATCHS ANALYSÉS (LAST N)", 5, 50, 15)
+    st.subheader("🛠 CONFIGURATION DE L'ANALYSE")
+    c_l, c_s, c_n = st.columns([2, 2, 1])
+    l_name = c_l.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="1v1_l")
+    scope_1v1 = c_s.select_slider("SCOPE DATA", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    last_n_1v1 = c_n.number_input("MATCHS", 5, 50, 15)
     
-    teams = {t['team']['name']: t['team']['id'] for t in get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})}
+    teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
+    teams = {t['team']['name']: t['team']['id'] for t in teams_res}
+    
     if teams:
-        col_t1, col_t2 = st.columns(2)
-        th, ta = col_t1.selectbox("EQUIPE DOMICILE", sorted(teams.keys())), col_t2.selectbox("EQUIPE EXTÉRIEUR", sorted(teams.keys()))
+        col1, col2 = st.columns(2)
+        th = col1.selectbox("DOMICILE", sorted(teams.keys()))
+        ta = col2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
         
-        if st.button("🚀 LANCER L'ANALYSE COMPLÈTE"):
-            # Calcul simulé ici (à remplacer par tes appels get_team_stats habituels)
-            lh, la = 1.6, 1.2 
-            st.session_state.v14_data = {"res": calculate_probs(lh, la), "th": th, "ta": ta}
+        if st.button("LANCER L'ANALYSE PROFONDE"):
+            ah, dh = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL", last_n_1v1)
+            aa, da = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL", last_n_1v1)
+            lh, la = (ah * da) ** 0.5 * 1.05, (aa * dh) ** 0.5 * 0.95
+            st.session_state.v6_res = {"res": calculate_perfect_probs(lh, la), "th": th, "ta": ta}
 
-    if 'v14_data' in st.session_state:
-        r, th_n, ta_n = st.session_state.v14_data["res"], st.session_state.v14_data["th"], st.session_state.v14_data["ta"]
+    if 'v6_res' in st.session_state:
+        r, th, ta = st.session_state.v6_res["res"], st.session_state.v6_res["th"], st.session_state.v6_res["ta"]
         
-        # --- 2. ANALYSE ---
-        st.markdown("<div class='section-box'><h3>📊 1. ANALYSE STATISTIQUE</h3>", unsafe_allow_html=True)
-        m = st.columns(4)
-        m[0].metric(th_n, f"{r['Home']:.1%}"); m[1].metric("NUL", f"{r['Draw']:.1%}"); m[2].metric(ta_n, f"{r['Away']:.1%}"); m[3].metric("BTTS OUI", f"{r['BTTS_Yes']:.1%}")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- 3. BET ---
-        st.markdown("<div class='section-box'><h3>💰 2. ZONE DE BET (ENTRER LES COTES)</h3>", unsafe_allow_html=True)
-        type_pari = st.selectbox("MARCHÉ CIBLE", ["Victoire Domicile", "Match Nul", "Victoire Extérieur", "1N", "N2", "12", "BTTS OUI"])
-        cote_book = st.number_input("COTE DU BOOKMAKER", 1.01, 100.0, 2.0, key="c_book")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- 4. AUDIT ---
-        st.markdown("<div class='audit-gold'><h3>🛡️ 3. AUDIT DE MISE FINALE</h3>", unsafe_allow_html=True)
-        p_map = {"Victoire Domicile": r['Home'], "Match Nul": r['Draw'], "Victoire Extérieur": r['Away'], "1N": r['1N'], "N2": r['N2'], "12": r['12'], "BTTS OUI": r['BTTS_Yes']}
-        prob = p_map[type_pari]
-        ev = prob * cote_book
+        st.markdown(f"### 📊 Probabilités : {th} vs {ta}")
+        m = st.columns(5)
+        m[0].metric(th, f"{r['p_h']:.1%}"); m[1].metric("NUL", f"{r['p_n']:.1%}"); m[2].metric(ta, f"{r['p_a']:.1%}")
+        m[3].metric("BTTS OUI", f"{r['p_btts']:.1%}"); m[4].metric("BTTS NON", f"{r['p_nobtts']:.1%}")
         
-        if ev > 1.05:
-            # Calcul de Kelly
-            b = cote_book - 1
-            kelly_f = (prob * b - (1 - prob)) / b
-            mise = round(max(0, kelly_f * capital * MODES_RISQUE[strat]['fraction']), 2)
-            
-            st.markdown(f"✅ **AUDIT POSITIF (EV: {ev:.2f})**")
-            st.write(f"Indice de confiance du modèle : {(prob**2*cote_book):.2f}")
-            st.markdown(f"<p class='stake-val'>{mise} €</p>", unsafe_allow_html=True)
-            st.write(f"Conseil : Misez {mise}€ selon votre stratégie {strat}")
-        else:
-            st.error(f"⚠️ AUDIT NÉGATIF (EV: {ev:.2f}). Le modèle déconseille ce pari.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("---")
+        st.subheader("💰 CALCULATEUR DE VALUE (TOUTES CATÉGORIES)")
+        
+        v1, v2, v3, v4 = st.columns(4)
+        c_h = v1.number_input(f"Cote {th}", 1.0); c_n = v2.number_input("Cote NUL", 1.0)
+        c_a = v3.number_input(f"Cote {ta}", 1.0); c_1n = v4.number_input(f"{th}/N", 1.0)
+        
+        v5, v6, v7, v8 = st.columns(4)
+        c_n2 = v5.number_input(f"N/{ta}", 1.0); c_12 = v6.number_input("12 (Sans Nul)", 1.0)
+        c_by = v7.number_input("BTTS OUI", 1.0); c_bn = v8.number_input("BTTS NON", 1.0)
+        
+        bets = [
+            (f"Victoire {th}", c_h, r['p_h']), ("Match Nul", c_n, r['p_n']), (f"Victoire {ta}", c_a, r['p_a']),
+            ("Double Chance 1N", c_1n, r['p_1n']), ("Double Chance N2", c_n2, r['p_n2']), ("Double Chance 12", c_12, r['p_12']),
+            ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn, r['p_nobtts'])
+        ]
+        
+        st.markdown("### 🎯 VERDICT VALUE")
+        for name, cote, prob in bets:
+            if cote > 1.0:
+                ev = cote * prob
+                score_elite = (prob**2) * cote
+                if ev > 1.05:
+                    st.success(f"🔥 **{name}** | EV: {ev:.2f} | Score Élite: {score_elite:.2f}")
 
 with tab2:
-    st.subheader("📡 SCANNER DE COMBINÉS (SANS LIMITE)")
-    st.markdown("<div class='section-box'>", unsafe_allow_html=True)
-    d1, d2, d3 = st.columns(3)
-    start_d = d1.date_input("DATE DÉBUT", datetime.now())
-    end_d = d2.date_input("DATE FIN", datetime.now() + timedelta(days=3))
-    l_gen = d3.selectbox("LIGUES À SCANNER", ["TOUTES"] + list(LEAGUES_DICT.keys()))
+    st.subheader("📡 SCANNER DE TICKETS AUTOMATISÉ")
+    sc1, sc2, sc3 = st.columns([2, 2, 1])
+    l_scan = sc1.selectbox("LIGUES", ["TOUTES"] + list(LEAGUES_DICT.keys()), key="sc_l")
+    scope_scan = sc2.select_slider("SCOPE DATA (SCANNER)", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="sc_s")
+    risk_mode = st.select_slider("PHILOSOPHIE DE JEU", options=list(RISK_LEVELS.keys()), value="MID")
     
-    mkt_gen = st.multiselect("MARCHÉS AUTORISÉS", ["1N2", "Double Chance", "BTTS"], default=["1N2", "BTTS"])
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    if st.button("🔥 GÉNÉRER LE TICKET ELITE"):
-        st.info("Recherche des meilleures opportunités sur la période sélectionnée...")
-        # (Logique du générateur identique à la V12, utilisant le capital et strat définis en haut)
+    sc4, sc5, sc6 = st.columns(3)
+    max_matches = sc4.number_input("LIMITE DE NOMBRE DE MATCHS", 1, 20, 5)
+    last_n_scan = sc5.number_input("PROFONDEUR DATA (LAST N)", 5, 50, 15, key="sc_n")
+    scan_date = sc6.date_input("DATE DU MATCH", datetime.now())
+
+    if st.button("🔥 GÉNÉRER TICKET ÉLITE & DISCORD"):
+        # (Logique du scanner identique avec envoi Webhook...)
+        lids = LEAGUES_DICT.values() if l_scan == "TOUTES" else [LEAGUES_DICT[l_scan]]
+        opps = []
+        cfg = RISK_LEVELS[risk_mode]
+        for lid in lids:
+            fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": scan_date.strftime('%Y-%m-%d')})
+            for f in fixtures:
+                if f['fixture']['status']['short'] != "NS": continue
+                ah, dh = get_team_stats(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL", last_n_scan)
+                aa, da = get_team_stats(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL", last_n_scan)
+                lh, la = (ah * da) ** 0.5 * 1.05, (aa * dh) ** 0.5 * 0.95
+                pr = calculate_perfect_probs(lh, la)
+                
+                odds = get_api("odds", {"fixture": f['fixture']['id']})
+                if odds and odds[0]['bookmakers']:
+                    for mkt in odds[0]['bookmakers'][0]['bets']:
+                        if mkt['name'] in ["Match Winner", "Double Chance", "Both Teams Score"]:
+                            for o in mkt['values']:
+                                cote = float(o['odd'])
+                                p_val = 0
+                                if o['value'] == 'Home': p_val = pr['p_h']
+                                elif o['value'] == 'Draw': p_val = pr['p_n']
+                                elif o['value'] == 'Away': p_val = pr['p_a']
+                                elif o['value'] == 'Home/Draw': p_val = pr['p_1n']
+                                elif o['value'] == 'Draw/Away': p_val = pr['p_n2']
+                                elif o['value'] == 'Yes': p_val = pr['p_btts']
+                                
+                                if p_val >= cfg['p_min']:
+                                    score = (p_val**2) * cote
+                                    if score >= cfg['elite_min']:
+                                        opps.append({"M": f"{f['teams']['home']['name']}-{f['teams']['away']['name']}", "P": o['value'], "C": cote, "Pr": p_val, "S": score})
+
+        final = sorted(opps, key=lambda x: x['S'], reverse=True)[:max_matches]
+        if final:
+            st.table(pd.DataFrame(final))
+            t_msg = f"🏆 **TICKET {risk_mode}**\n*Limite: {max_matches} matchs*\n\n" + "\n".join([f"🔹 {x['M']} : {x['P']} @{x['C']}" for x in final])
+            requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [{"title": "CLEMENTRNXX PREDICTOR", "description": t_msg, "color": 16766720}]})
+            st.success("✅ Envoyé sur Discord !")
+
+with tab3:
+    st.subheader("📊 CLASSEMENTS")
+    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="st_l")
+    standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
+    if standings:
+        df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form']} for t in standings[0]['league']['standings'][0]])
+        st.dataframe(df, use_container_width=True)
