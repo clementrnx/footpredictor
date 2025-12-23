@@ -3,12 +3,111 @@ import requests
 import numpy as np
 from scipy.stats import poisson
 
-# ================== CONFIG ==================
+# ================== PAGE & CSS ==================
 st.set_page_config(page_title="iTrOz Predictor", layout="wide")
 
+st.markdown("""
+<style>
+@keyframes subtleDistort {
+    0% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
+    50% { transform: scale(1.02) contrast(1.1); filter: hue-rotate(2deg) brightness(1.1); }
+    100% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
+}
+.stApp {
+    background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
+    background-size: cover;
+    background-attachment: fixed;
+    animation: subtleDistort 10s infinite ease-in-out;
+    overflow: hidden;
+}
+.stApp::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
+                rgba(255, 215, 0, 0.15) 0%, 
+                rgba(0,0,0,0) 50%);
+    pointer-events: none;
+    z-index: 1;
+}
+.stApp > div:first-child { background-color: rgba(0, 0, 0, 0.85); position: relative; z-index: 2; }
+
+h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; letter-spacing: 2px; }
+
+div.stButton > button {
+    background: rgba(255, 215, 0, 0.03) !important;
+    backdrop-filter: blur(25px) !important;
+    -webkit-backdrop-filter: blur(25px) !important;
+    border: 1px solid rgba(255, 215, 0, 0.2) !important;
+    color: #FFD700 !important;
+    border-radius: 15px !important;
+    height: 70px !important;
+    width: 100% !important;
+    font-weight: 200 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 12px !important;
+    transition: 0.6s all ease-in-out;
+    margin-top: 20px;
+}
+div.stButton > button:hover { 
+    background: rgba(255, 215, 0, 0.1) !important;
+    border: 1px solid rgba(255, 215, 0, 0.6) !important;
+    letter-spacing: 16px !important;
+    box-shadow: 0 0 40px rgba(255, 215, 0, 0.15);
+}
+
+div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 0.5px solid rgba(255, 215, 0, 0.15) !important;
+    border-radius: 10px !important;
+    color: #FFD700 !important;
+}
+
+.verdict-text {
+    font-size: 26px; font-weight: 900; text-align: center; padding: 30px;
+    letter-spacing: 6px; text-transform: uppercase;
+    border-top: 1px solid rgba(255, 215, 0, 0.1);
+    border-bottom: 1px solid rgba(255, 215, 0, 0.1);
+    margin: 15px 0;
+}
+
+.bet-card {
+    background: rgba(255, 255, 255, 0.02);
+    padding: 30px; border-radius: 20px;
+    border: 1px solid rgba(255, 215, 0, 0.05);
+    margin-bottom: 40px;
+}
+
+.score-card {
+    background: rgba(255, 255, 255, 0.02);
+    padding: 20px; border-radius: 15px;
+    border: 1px solid rgba(255, 215, 0, 0.05);
+    margin-top: 20px;
+}
+
+.footer {
+    text-align: center; padding: 50px 0 20px 0;
+    color: rgba(255, 215, 0, 0.6); font-family: 'Monospace', sans-serif; font-size: 14px;
+}
+.footer a {
+    color: #FFD700 !important; text-decoration: none; font-weight: bold;
+    border: 1px solid rgba(255, 215, 0, 0.2); padding: 8px 15px; border-radius: 5px;
+}
+</style>
+
+<script>
+const doc = document.documentElement;
+document.addEventListener('mousemove', e => {
+    doc.style.setProperty('--mouse-x', e.clientX + 'px');
+    doc.style.setProperty('--mouse-y', e.clientY + 'px');
+});
+</script>
+""", unsafe_allow_html=True)
+
+# ================== CONFIG ==================
 API_KEY = st.secrets["MY_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
-HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 MAX_STAKE = 0.70
 
@@ -16,7 +115,7 @@ MAX_STAKE = 0.70
 @st.cache_data(ttl=3600)
 def get_api(endpoint, params):
     try:
-        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=10)
+        r = requests.get(f"{BASE_URL}{endpoint}", headers={'x-apisports-key': API_KEY}, params=params, timeout=10)
         return r.json().get('response', [])
     except:
         return []
@@ -98,6 +197,7 @@ if st.button("Lancer la prédiction"):
     lh = ctx['avg_home']
     la = ctx['avg_away']
 
+    # ---------------- SCORES -----------------
     max_g = 10
     matrix = np.zeros((max_g, max_g))
     for i in range(max_g):
@@ -113,6 +213,18 @@ if st.button("Lancer la prédiction"):
     st.metric("NUL", f"{p_n*100:.1f}%")
     st.metric(away, f"{p_a*100:.1f}%")
 
+    # ---------------- PROBABILITÉ DE SCORE -----------------
+    st.subheader("Probabilité de score exact")
+    score_html = "<div class='score-card'><ul>"
+    for i in range(5):
+        for j in range(5):
+            prob = matrix[i,j]*100
+            if prob > 2:  # n'affiche que >2%
+                score_html += f"<li>{home} {i} - {j} {away} : {prob:.1f}%</li>"
+    score_html += "</ul></div>"
+    st.markdown(score_html, unsafe_allow_html=True)
+
+    # ---------------- MODE BET -----------------
     st.subheader("MODE BET")
 
     bankroll = st.number_input("CAPITAL (€)", value=100.0)
@@ -162,10 +274,25 @@ if st.button("Lancer la prédiction"):
     if res:
         o, stake = res
         st.markdown(
-            f"### ✅ {bet_mode}\n"
-            f"**Pari :** {o['name']}\n\n"
-            f"**Mise :** {stake:.2f} €\n\n"
-            f"EV: {o['ev']:.2f} | Kelly: {o['kelly']:.2f} | Conf: {o['confidence']}/3"
+            f"<div class='verdict-text'>IA RECOMMANDE : {o['name']} | MISE : {stake:.2f}€</div>",
+            unsafe_allow_html=True
         )
+
+        # ---------- MINI AUDIT ----------
+        audit_html = f"""
+        <div class='score-card'>
+        <strong>Audit du ticket :</strong><br>
+        EV : {o['ev']:.2f} | Kelly : {o['kelly']:.2f} | Confiance : {o['confidence']}/3<br>
+        Mise recommandée : {stake:.2f}€
+        </div>
+        """
+        st.markdown(audit_html, unsafe_allow_html=True)
     else:
-        st.warning("Aucun pari recommandé dans ce mode.")
+        st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
+
+st.markdown("""
+<div class='footer'>
+DÉVELOPPÉ PAR ITROZ | 
+<a href='https://github.com/VOTRE_PROFIL' target='_blank'>GITHUB SOURCE</a>
+</div>
+""", unsafe_allow_html=True)
