@@ -439,6 +439,28 @@ if st.session_state.simulation_done:
             st.write(f"**{idx[0][i]} - {idx[1][i]}**")
             st.write(f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
     
+    with st.expander("🔍 DEBUG API - DERNIERS MATCHS"):
+        if 'debug_fixtures_h' in st.session_state:
+            st.write(f"**{d['t_h']} - 5 derniers matchs :**")
+            for f in st.session_state.debug_fixtures_h[:5]:
+                date = f['fixture']['date'][:10]
+                home = f['teams']['home']['name']
+                away = f['teams']['away']['name']
+                score = f"{f['goals']['home']}-{f['goals']['away']}"
+                xg_h = f['teams']['home'].get('xg', 'N/A')
+                xg_a = f['teams']['away'].get('xg', 'N/A')
+                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
+            
+            st.write(f"**{d['t_a']} - 5 derniers matchs :**")
+            for f in st.session_state.debug_fixtures_a[:5]:
+                date = f['fixture']['date'][:10]
+                home = f['teams']['home']['name']
+                away = f['teams']['away']['name']
+                score = f"{f['goals']['home']}-{f['goals']['away']}"
+                xg_h = f['teams']['home'].get('xg', 'N/A')
+                xg_a = f['teams']['away'].get('xg', 'N/A')
+                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
+    
     with st.expander("📊 DÉTAILS TECHNIQUES"):
         xg_status_h = f"✅ xG ({d['xg_h_matches']} matchs)" if d['using_xg_h'] else "⚠️ Buts réels"
         xg_status_a = f"✅ xG ({d['xg_a_matches']} matchs)" if d['using_xg_a'] else "⚠️ Buts réels"
