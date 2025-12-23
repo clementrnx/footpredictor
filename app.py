@@ -21,7 +21,6 @@ st.markdown("""
     }
     div.stButton > button:hover { background: #FFD700 !important; color: black !important; box-shadow: 0 0 30px rgba(255, 215, 0, 0.6); }
     .verdict-box { border: 2px solid #FFD700; padding: 25px; text-align: center; border-radius: 20px; background: rgba(0,0,0,0.8); margin: 20px 0; }
-    .recommendation-box { border: 1px solid #FFD700; padding: 15px; border-radius: 10px; background: rgba(255, 215, 0, 0.05); margin-top: 10px; }
     .score-card { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 215, 0, 0.4); padding: 15px; border-radius: 12px; text-align: center; }
     .github-link { display: block; text-align: center; color: #FFD700 !important; font-weight: bold; font-size: 1.2rem; text-decoration: none; margin-top: 40px; padding: 20px; border-top: 1px solid rgba(255, 215, 0, 0.2); }
     </style>
@@ -35,44 +34,38 @@ HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 
 LEAGUES_DICT = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135, "Bundesliga": 78}
+
+# Modèle de Risque : Ajusté pour favoriser les "Sure-Bets" mathématiques
 RISK_LEVELS = {
-    "SAFE": {"p": 0.82, "ev": 1.02, "kelly": 0.02, "legs": 2},
-    "MID-SAFE": {"p": 0.74, "ev": 1.05, "kelly": 0.05, "legs": 3},
-    "MID": {"p": 0.64, "ev": 1.08, "kelly": 0.08, "legs": 4},
-    "MID-AGGRESSIF": {"p": 0.52, "ev": 1.12, "kelly": 0.12, "legs": 5},
-    "AGGRESSIF": {"p": 0.42, "ev": 1.15, "kelly": 0.20, "legs": 7}
+    "SAFE": {"p_min": 0.85, "ev_min": 1.02, "kelly": 0.04, "legs": 2}, # Focus No-match
+    "MID-SAFE": {"p_min": 0.75, "ev_min": 1.05, "kelly": 0.06, "legs": 3},
+    "MID": {"p_min": 0.65, "ev_min": 1.10, "kelly": 0.08, "legs": 4},
+    "MID-AGGRESSIF": {"p_min": 0.55, "ev_min": 1.15, "kelly": 0.12, "legs": 5},
+    "AGGRESSIF": {"p_min": 0.45, "ev_min": 1.20, "kelly": 0.18, "legs": 6}
 }
 
-# --- FONCTIONS ---
-@st.cache_data(ttl=3600)
-def get_api(endpoint, params):
-    try:
-        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
-        if r.status_code == 429: time.sleep(1); return get_api(endpoint, params)
-        return r.json().get('response', [])
-    except: return []
+# --- FONCTIONS DE CALCUL ---
 
 def get_team_stats(team_id, league_id, scope_overall):
     params = {"team": team_id, "season": SEASON, "last": 15}
     if not scope_overall: params["league"] = league_id
     f = get_api("fixtures", params)
-    if not f: return 1.2, 1.2
+    if not f: return 1.3, 1.3
     scored, conceded = [], []
     for m in f:
         if m['goals']['home'] is not None:
             is_home = m['teams']['home']['id'] == team_id
             scored.append(m['goals']['home'] if is_home else m['goals']['away'])
             conceded.append(m['goals']['away'] if is_home else m['goals']['home'])
-    if not scored: return 1.2, 1.2
-    weights = [0.95 ** i for i in range(len(scored))]
-    sum_w = sum(weights)
-    return sum(s * w for s, w in zip(scored, weights)) / sum_w, sum(c * w for c, w in zip(conceded, weights)) / sum_w
+    if not scored: return 1.3, 1.3
+    weights = [0.96 ** i for i in range(len(scored))] # 0.96 pour une mémoire de forme légèrement plus longue
+    return sum(s * w for s, w in zip(scored, weights)) / sum(weights), sum(c * w for c, w in zip(conceded, weights)) / sum(weights)
 
 def calculate_perfect_probs(lh, la):
     rho = -0.11
-    matrix = np.zeros((10, 10))
-    for x in range(10):
-        for y in range(10):
+    matrix = np.zeros((12, 12)) # Matrice élargie pour plus de précision sur les gros scores
+    for x in range(12):
+        for y in range(12):
             prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
             adj = 1.0
             if x == 0 and y == 0: adj = 1 - (lh * la * rho)
@@ -84,14 +77,17 @@ def calculate_perfect_probs(lh, la):
     p_h, p_n, p_a = np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
     return {"p_h": p_h, "p_n": p_n, "p_a": p_a, "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, "p_btts": np.sum(matrix[1:, 1:]), "p_nobtts": 1.0 - np.sum(matrix[1:, 1:]), "matrix": matrix}
 
-def send_to_discord(ticket, total_odd, mode):
-    matches_text = "\n".join([f"🔹 {t['MATCH']} : **{t['PARI']}** (@{t['COTE']}) - {t['PROBA']}" for t in ticket])
-    payload = {"embeds": [{"title": f"🚀 NOUVEAU TICKET - MODE {mode}", "description": f"{matches_text}\n\n🔥 **COTE TOTALE : @{total_odd:.2f}**", "color": 16766720}]}
-    requests.post(DISCORD_WEBHOOK, json=payload)
+@st.cache_data(ttl=3600)
+def get_api(endpoint, params):
+    try:
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
+        if r.status_code == 429: time.sleep(1); return get_api(endpoint, params)
+        return r.json().get('response', [])
+    except: return []
 
 # --- UI ---
 st.title(" CLEMENTRNXX PREDICTOR V5.5")
-st.subheader("FINAL EDITION")
+st.subheader("MODÈLE D'ARBITRAGE MATHÉMATIQUE - NO-MATCH PRIORITY")
 
 tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
 
@@ -104,7 +100,7 @@ with tab1:
     if teams:
         c1, c2 = st.columns(2)
         th, ta = c1.selectbox("DOMICILE", sorted(teams.keys())), c2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
-        if st.button("LANCER L'ANALYSE"):
+        if st.button("LANCER L'ANALYSE "):
             att_h, def_h = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             att_a, def_a = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
@@ -119,11 +115,11 @@ with tab1:
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
-        st.subheader(" MODULE BET")
+        st.subheader(" MODULE BET OPTIMISÉ")
         bc1, bc2 = st.columns([2, 1])
         with bc2:
-            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0)
-            risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2)
+            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0)
+            risk_1v1 = st.selectbox("STRATÉGIE DE MISE", list(RISK_LEVELS.keys()), index=0)
         
         with bc1:
             i1, i2, i3, i4 = st.columns(4)
@@ -134,43 +130,39 @@ with tab1:
             i5, i6, i7 = st.columns(3)
             c_ab = i5.number_input(f"{th}/{ta}", value=1.0)
             c_by = i6.number_input("BTTS OUI", value=1.0)
-            c_bn = i7.number_input("BTTS NON", value=1.0)
+            c_bn_val = i7.number_input("BTTS NON", value=1.0)
 
-        # Logique de recommandation
         cfg = RISK_LEVELS[risk_1v1]
         bets = [
             (f"Victoire {th}", c_a, r['p_h']), (f"Double Chance {th}/N", c_an, r['p_1n']),
             (f"Double Chance N/{ta}", c_bn, r['p_n2']), (f"Victoire {ta}", c_b, r['p_a']),
-            (f"Issue {th}/{ta}", c_ab, r['p_12']), ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn, r['p_nobtts'])
+            (f"Issue {th}/{ta}", c_ab, r['p_12']), ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn_val, r['p_nobtts'])
         ]
         
-        valid_bets = [b for b in bets if b[1] > 1.0 and b[2] >= cfg['p'] and (b[1] * b[2]) >= cfg['ev']]
-        st.markdown("### 📋 VERDICT ALGORITHME")
+        # Le modèle parfait trie par (Value * Probabilité) pour écraser la variance
+        valid_bets = [b for b in bets if b[1] > 1.0 and b[2] >= cfg['p_min'] and (b[1] * b[2]) >= cfg['ev_min']]
+        valid_bets = sorted(valid_bets, key=lambda x: (x[1]*x[2]) * x[2], reverse=True) 
+
+        st.markdown("### 🎯 SÉLECTION DU MODÈLE")
         if valid_bets:
             for name, cote, prob in valid_bets:
                 mise = bankroll * cfg['kelly']
-                st.success(f"✅ **CONSEILLÉ : {name}** | Cote: @{cote} | Confiance: {prob*100:.1f}% | Mise suggérée: {mise:.2f}€")
+                st.success(f"💎 **STRICT PICK : {name}** | Cote: @{cote} | Fiabilité: {prob*100:.1f}% | Mise: {mise:.2f}€")
         else:
-            st.warning("⚠️ AUCUN PARI NE CORRESPOND À VOS CRITÈRES DE RISQUE ACTUELS.")
-
-        st.subheader("TOP SCORES")
-        idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
-        sc = st.columns(5)
-        for i in range(5): sc[i].markdown(f"<div class='score-card'><b>{idx[0][i]} - {idx[1][i]}</b><br>{r['matrix'][idx[0][i],idx[1][i]]*100:.1f}%</div>", unsafe_allow_html=True)
+            st.warning("⚠️ AUCUN 'NO-MATCH' DÉTECTÉ. PATIENCE EST MÈRE DE PROFIT.")
 
 with tab2:
-    st.subheader(" GÉNÉRATEUR DE TICKETS")
+    st.subheader(" SCANNER DE TICKETS À VARIANCE FAIBLE")
     gc1, gc2, gc3, gc4 = st.columns(4)
-    l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
-    d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
-    bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan")
-    scope_scan = gc4.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    l_scan = gc1.selectbox("LIGUES", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="lsc")
+    d_scan = gc2.date_input("DATE", datetime.now(), key="dsc")
+    bank_scan = gc3.number_input("FONDS (€)", value=100.0, key="bsc")
+    scope_scan = gc4.select_slider("DATA", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="ssc")
     
-    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
-    risk_mode = st.select_slider("RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
+    risk_mode = st.select_slider("PROFIL DE RISQUE (SÉCURITÉ MAXIMALE VS GAIN)", options=list(RISK_LEVELS.keys()), value="SAFE")
     risk_cfg = RISK_LEVELS[risk_mode]
     
-    if st.button("GÉNÉRER "):
+    if st.button("GÉNÉRER LE TICKET MATHÉMATIQUEMENT SUPÉRIEUR"):
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
@@ -182,16 +174,14 @@ with tab2:
                 lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
                 pr, h_n, a_n = calculate_perfect_probs(lh, la), f['teams']['home']['name'], f['teams']['away']['name']
                 
-                tests = []
-                if "ISSUE SIMPLE" in selected_markets:
-                    tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
-                if "DOUBLE CHANCE" in selected_markets:
-                    tests += [(f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away")]
-                if "BTTS (OUI/NON)" in selected_markets:
-                    tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
+                tests = [
+                    (h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away"),
+                    (f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away"),
+                    ("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")
+                ]
 
                 for lbl, p, m_n, m_v in tests:
-                    if p >= risk_cfg['p']:
+                    if p >= risk_cfg['p_min']:
                         odds = get_api("odds", {"fixture": f['fixture']['id']})
                         if odds and odds[0]['bookmakers']:
                             for btt in odds[0]['bookmakers'][0]['bets']:
@@ -200,26 +190,43 @@ with tab2:
                                         if o['value'] == m_v:
                                             try:
                                                 ct = float(o['odd'])
-                                                if (p * ct) >= risk_cfg['ev']:
-                                                    opps.append({"MATCH": f"{h_n}-{a_n}", "PARI": lbl, "COTE": ct, "PROBA": f"{p*100:.1f}%", "VALUE": p*ct})
+                                                ev = p * ct
+                                                if ev >= risk_cfg['ev_min']:
+                                                    # LE SCORE DE FIABILITÉ : Value * Probabilité²
+                                                    # Cela punit les cotes élevées avec probabilité moyenne
+                                                    reliability = ev * (p ** 2)
+                                                    opps.append({"MATCH": f"{h_n}-{a_n}", "PARI": lbl, "COTE": ct, "PROBA": p, "SCORE": reliability})
                                             except: continue
         
-        final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
+        # Le tri se fait sur le SCORE de fiabilité (les No-matchs passent devant)
+        final_ticket = sorted(opps, key=lambda x: x['SCORE'], reverse=True)[:risk_cfg['legs']]
+        
         if final_ticket:
             total_odd = np.prod([x['COTE'] for x in final_ticket])
+            total_proba = np.prod([x['PROBA'] for x in final_ticket])
             mise_totale = bank_scan * risk_cfg['kelly']
-            st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{total_odd:.2f} | MISE CONSEILLÉE : {mise_totale:.2f}€</div>", unsafe_allow_html=True)
-            st.table(final_ticket)
-            send_to_discord(final_ticket, total_odd, risk_mode)
-            st.toast("✅ Ticket publié avec succès !")
-        else: st.error("Aucune opportunité trouvée.")
+            
+            st.markdown(f"""
+            <div class='verdict-box'>
+                <h2 style='margin:0; color:#FFD700'>SÉLECTION ÉLITE</h2>
+                <p style='font-size:1.4rem'>Cote Totale : <b>@{total_odd:.2f}</b></p>
+                <p>Confiance Algorithmique : <b>{total_proba*100:.2f}%</b></p>
+                <p>Mise Stratégique : <b>{mise_totale:.2f}€</b></p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            df_disp = pd.DataFrame(final_ticket)
+            df_disp['PROBA'] = df_disp['PROBA'].apply(lambda x: f"{x*100:.1f}%")
+            st.table(df_disp[['MATCH', 'PARI', 'COTE', 'PROBA']])
+        else:
+            st.error("Aucun arbitrage parfait trouvé aujourd'hui.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
-    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()))
+    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="lsl")
     standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
     if standings:
         df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form'], "Buts+": t['all']['goals']['for']} for t in standings[0]['league']['standings'][0]])
         st.dataframe(df, use_container_width=True)
 
-st.markdown("""<a href="https://github.com/clementrnx" class="github-link" target="_blank" style="color:#FFD700;">GITHUB : github.com/clementrnx</a>""", unsafe_allow_html=True)
+st.markdown("""<a href="https://github.com/clementrnx" class="github-link" target="_blank">GITHUB : github.com/clementrnx</a>""", unsafe_allow_html=True)
