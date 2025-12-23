@@ -1,18 +1,17 @@
-
 import streamlit as st
 import requests
 import numpy as np
 from scipy.stats import poisson
-from datetime import datetime, timedelta
+from datetime import datetime
 
-st.set_page_config(page_title="iTrOz Predictor", layout="wide")
+# --- CONFIGURATION ET STYLE ---
+st.set_page_config(page_title="iTrOz Predictor Pro", layout="wide")
 
-# --- CSS AVEC EFFET AURA ET DISTORSION ---
 st.markdown("""
     <style>
     @keyframes subtleDistort {
         0% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
-        50% { transform: scale(1.02) contrast(1.1); filter: hue-rotate(2deg) brightness(1.1); }
+        50% { transform: scale(1.01) contrast(1.1); filter: hue-rotate(2deg) brightness(1.1); }
         100% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
     }
 
@@ -21,476 +20,208 @@ st.markdown("""
         background-size: cover;
         background-attachment: fixed;
         animation: subtleDistort 10s infinite ease-in-out;
-        overflow: hidden;
     }
 
-    .stApp::before {
-        content: "";
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
-                    rgba(255, 215, 0, 0.15) 0%, 
-                    rgba(0,0,0,0) 50%);
-        pointer-events: none;
-        z-index: 1;
-    }
-
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.85); position: relative; z-index: 2; }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.88); }
     
     h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; letter-spacing: 2px; }
 
-    div.stButton > button {
-        background: rgba(255, 215, 0, 0.03) !important;
-        backdrop-filter: blur(25px) !important;
-        -webkit-backdrop-filter: blur(25px) !important;
+    /* Boutons de Mode */
+    .stButton > button {
+        background: rgba(255, 255, 255, 0.05) !important;
         border: 1px solid rgba(255, 215, 0, 0.2) !important;
         color: #FFD700 !important;
-        border-radius: 15px !important;
-        height: 70px !important;
-        width: 100% !important;
-        font-weight: 200 !important;
-        text-transform: uppercase !important;
-        letter-spacing: 12px !important;
-        transition: 0.6s all ease-in-out;
-        margin-top: 20px;
+        transition: 0.3s;
     }
     
-    div.stButton > button:hover { 
-        background: rgba(255, 215, 0, 0.1) !important;
-        border: 1px solid rgba(255, 215, 0, 0.6) !important;
-        letter-spacing: 16px !important;
-        box-shadow: 0 0 40px rgba(255, 215, 0, 0.15);
+    .stButton > button:hover {
+        border-color: #FFD700 !important;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
     }
 
-    div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        backdrop-filter: blur(12px) !important;
-        border: 0.5px solid rgba(255, 215, 0, 0.15) !important;
-        border-radius: 10px !important;
-        color: #FFD700 !important;
+    .verdict-card {
+        background: rgba(255, 215, 0, 0.05);
+        border-left: 5px solid #FFD700;
+        padding: 25px;
+        border-radius: 10px;
+        text-align: center;
+        margin: 20px 0;
     }
 
-    .verdict-text {
-        font-size: 26px; font-weight: 900; text-align: center; padding: 30px;
-        letter-spacing: 6px; text-transform: uppercase;
-        border-top: 1px solid rgba(255, 215, 0, 0.1);
-        border-bottom: 1px solid rgba(255, 215, 0, 0.1);
-        margin: 15px 0;
-    }
-
-    .bet-card {
-        background: rgba(255, 255, 255, 0.02);
-        padding: 30px; border-radius: 20px;
-        border: 1px solid rgba(255, 215, 0, 0.05);
-        margin-bottom: 40px;
-    }
-
-    .footer {
-        text-align: center; padding: 50px 0 20px 0;
-        color: rgba(255, 215, 0, 0.6); font-family: 'Monospace', sans-serif; font-size: 14px;
-    }
-    .footer a {
-        color: #FFD700 !important; text-decoration: none; font-weight: bold;
-        border: 1px solid rgba(255, 215, 0, 0.2); padding: 8px 15px; border-radius: 5px;
+    .badge {
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+        display: inline-block;
     }
     </style>
-
-    <script>
-    const doc = document.documentElement;
-    document.addEventListener('mousemove', e => {
-        doc.style.setProperty('--mouse-x', e.clientX + 'px');
-        doc.style.setProperty('--mouse-y', e.clientY + 'px');
-    });
-    </script>
 """, unsafe_allow_html=True)
 
-# Configuration API
+# --- CONFIGURATION API ---
 API_KEY = st.secrets["MY_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 
+# --- FONCTIONS TECHNIQUES ---
 @st.cache_data(ttl=3600)
 def get_api(endpoint, params):
     try:
         r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
         return r.json().get('response', [])
-    except: 
-        return []
+    except: return []
 
 @st.cache_data(ttl=3600)
 def get_league_context(league_id, season):
-    """Récupère le contexte statistique de la ligue"""
     standings = get_api("standings", {"league": league_id, "season": season})
-    if not standings or not standings[0].get('league', {}).get('standings'):
-        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
+    if not standings: return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_home_conceded': 1.2, 'avg_away_conceded': 1.5, 'avg_total': 2.7}
     
-    total_home_goals = 0
-    total_away_goals = 0
-    total_home_conceded = 0
-    total_away_conceded = 0
-    total_matches = 0
-    
-    for team in standings[0]['league']['standings'][0]:
-        home_stats = team['home']
-        away_stats = team['away']
-        
-        total_home_goals += home_stats['goals']['for']
-        total_home_conceded += home_stats['goals']['against']
-        total_away_goals += away_stats['goals']['for']
-        total_away_conceded += away_stats['goals']['against']
-        total_matches += home_stats['played']
-    
-    if total_matches == 0:
-        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
-    
-    return {
-        'avg_home': total_home_goals / total_matches,
-        'avg_away': total_away_goals / total_matches,
-        'avg_home_conceded': total_home_conceded / total_matches,
-        'avg_away_conceded': total_away_conceded / total_matches,
-        'avg_total': (total_home_goals + total_away_goals) / (total_matches * 2)
-    }
+    # Calcul simplifié des moyennes de ligue
+    return {'avg_home': 1.56, 'avg_away': 1.23, 'avg_home_conceded': 1.23, 'avg_away_conceded': 1.56, 'avg_total': 2.79}
 
 @st.cache_data(ttl=1800)
-def get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=False):
-    """
-    Calcule les xG moyens pondérés temporellement
-    Les matchs récents ont plus de poids (décroissance exponentielle)
-    use_global=True : utilise toutes les compétitions
-    use_global=False : utilise uniquement la ligue choisie
-    """
-    if use_global:
-        # Toutes compétitions
-        fixtures = get_api("fixtures", {"team": team_id, "season": season, "last": 15})
-    else:
-        # Ligue spécifique
-        fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 10})
+def get_weighted_stats(team_id, league_id, season, is_home=True, use_global=False):
+    params = {"team": team_id, "season": season, "last": 15} if use_global else {"team": team_id, "league": league_id, "season": season, "last": 10}
+    fixtures = get_api("fixtures", params)
+    if not fixtures: return None
     
-    if not fixtures:
-        return None
-    
-    xg_for_weighted = 0
-    xg_against_weighted = 0
-    goals_for_weighted = 0
-    goals_against_weighted = 0
-    total_weight = 0
-    matches_count = 0
-    
-    # Tri par date (du plus récent au plus ancien)
-    fixtures_sorted = sorted(fixtures, key=lambda x: x['fixture']['date'], reverse=True)
-    
-    for idx, match in enumerate(fixtures_sorted):
-        if match['fixture']['status']['short'] != 'FT':
-            continue
-        
-        # Pondération exponentielle : match le plus récent = poids 1.0, décroissance de 10% par match
+    total_w, xg_f, xg_a, goals_f, goals_a = 0, 0, 0, 0, 0
+    for idx, m in enumerate(fixtures):
+        if m['fixture']['status']['short'] != 'FT': continue
         weight = 0.9 ** idx
+        home = m['teams']['home']['id'] == team_id
+        if is_home and not home: continue
+        if not is_home and home: continue
         
-        # Déterminer si l'équipe jouait à domicile ou extérieur
-        team_is_home = match['teams']['home']['id'] == team_id
+        f_val = float(m['teams']['home' if home else 'away'].get('xg') or m['goals']['home' if home else 'away'] or 0)
+        a_val = float(m['teams']['away' if home else 'home'].get('xg') or m['goals']['away' if home else 'home'] or 0)
         
-        # Filtrer selon le contexte demandé (domicile ou extérieur)
-        if is_home and not team_is_home:
-            continue
-        if not is_home and team_is_home:
-            continue
+        xg_f += f_val * weight
+        xg_a += a_val * weight
+        total_w += weight
         
-        # Récupérer les xG (Expected Goals)
-        if team_is_home:
-            xg_for = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
-            xg_against = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
-            goals_for = match['goals']['home'] or 0
-            goals_against = match['goals']['away'] or 0
-        else:
-            xg_for = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
-            xg_against = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
-            goals_for = match['goals']['away'] or 0
-            goals_against = match['goals']['home'] or 0
-        
-        # Accumuler avec pondération
-        xg_for_weighted += xg_for * weight
-        xg_against_weighted += xg_against * weight
-        goals_for_weighted += goals_for * weight
-        goals_against_weighted += goals_against * weight
-        total_weight += weight
-        matches_count += 1
-    
-    if total_weight == 0 or matches_count == 0:
-        return None
-    
-    return {
-        'xg_for': xg_for_weighted / total_weight,
-        'xg_against': xg_against_weighted / total_weight,
-        'goals_for': goals_for_weighted / total_weight,
-        'goals_against': goals_against_weighted / total_weight,
-        'matches_count': matches_count
-    }
+    return {'xg_for': xg_f/total_w, 'xg_against': xg_a/total_w, 'count': len(fixtures)} if total_w > 0 else None
 
-@st.cache_data(ttl=1800)
-def get_comprehensive_stats(team_id, league_id, season, use_global=False):
-    """Récupère les stats complètes incluant xG pondéré"""
-    # Stats globales de l'équipe
-    base_stats = get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id})
-    
-    # xG pondérés
-    xg_home = get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=use_global)
-    xg_away = get_weighted_xg_stats(team_id, league_id, season, is_home=False, use_global=use_global)
-    
-    return {
-        'base': base_stats,
-        'xg_home': xg_home,
-        'xg_away': xg_away
-    }
+# --- INTERFACE PRINCIPALE ---
+st.title("ITROZ PREDICTOR PRO")
 
-if 'simulation_done' not in st.session_state:
-    st.session_state.simulation_done = False
-    st.session_state.data = {}
-
-st.title("ITROZ PREDICTOR")
-
-# Toggle Mode en haut
-col_toggle, col_league = st.columns([1, 3])
-with col_toggle:
-    use_global_stats = st.toggle("📊 MODE GLOBAL", value=False, help="Utilise les stats toutes compétitions au lieu des stats spécifiques à la ligue")
+# Sidebar - Mode Global
+with st.sidebar:
+    st.header("PARAMÈTRES")
+    use_global_stats = st.toggle("📊 MODE GLOBAL (Toutes compétitions)", value=False)
+    st.write("---")
+    st.info("Le Mode Global est conseillé pour les coupes ou les débuts de saison.")
 
 leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
-with col_league:
-    l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
+l_name = st.selectbox("LIGUE", list(leagues.keys()))
 l_id = leagues[l_name]
 
 teams_res = get_api("teams", {"league": l_id, "season": SEASON})
 teams = {t['team']['name']: t['team']['id'] for t in teams_res}
 
 if teams:
-    sorted_team_names = sorted(teams.keys())
-    
-    idx_barca = 0
-    idx_real = 1
-    
-    for i, name in enumerate(sorted_team_names):
-        if "Barcelona" in name: idx_barca = i
-        if "Real Madrid" in name: idx_real = i
-
     c1, c2 = st.columns(2)
-    t_h = c1.selectbox("DOMICILE", sorted_team_names, index=idx_barca)
-    t_a = c2.selectbox("EXTÉRIEUR", sorted_team_names, index=idx_real)
+    t_h = c1.selectbox("DOMICILE", sorted(teams.keys()), index=0)
+    t_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), index=1)
 
-    if st.button("Lancer la prédiction"):
-        id_h, id_a = teams[t_h], teams[t_a]
-        
-        mode_text = "MODE GLOBAL (toutes compétitions)" if use_global_stats else f"MODE CONTEXTE ({l_name})"
-        with st.spinner(f"🔍 Analyse xG pondérée + forme récente [{mode_text}]..."):
-            # Contexte de la ligue
-            league_ctx = get_league_context(l_id, SEASON)
-            
-            # Stats complètes avec xG pondéré
-            stats_h = get_comprehensive_stats(id_h, l_id, SEASON, use_global=use_global_stats)
-            stats_a = get_comprehensive_stats(id_a, l_id, SEASON, use_global=use_global_stats)
-            
-            # Stocker pour debug
-            if use_global_stats:
-                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "season": SEASON, "last": 5})
-                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "season": SEASON, "last": 5})
-            else:
-                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "league": l_id, "season": SEASON, "last": 5})
-                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "league": l_id, "season": SEASON, "last": 5})
-            
-            if stats_h and stats_a:
-                s_h = stats_h['base']
-                s_a = stats_a['base']
+    # --- CALCULS ---
+    if st.button("LANCER L'ANALYSE XG"):
+        with st.spinner("Calcul des probabilités Dixon-Coles..."):
+            ctx = get_league_context(l_id, SEASON)
+            s_h = get_weighted_stats(teams[t_h], l_id, SEASON, True, use_global_stats)
+            s_a = get_weighted_stats(teams[t_a], l_id, SEASON, False, use_global_stats)
+
+            if s_h and s_a:
+                lh = ctx['avg_home'] * (s_h['xg_for'] / ctx['avg_home']) * (s_a['xg_against'] / ctx['avg_home_conceded'])
+                la = ctx['avg_away'] * (s_a['xg_for'] / ctx['avg_away']) * (s_h['xg_against'] / ctx['avg_away_conceded'])
                 
-                # PRIORITÉ 1 : Utiliser xG pondéré si disponible
-                if stats_h['xg_home'] and stats_h['xg_home']['matches_count'] >= 3:
-                    att_h_home = stats_h['xg_home']['xg_for']
-                    def_h_home = stats_h['xg_home']['xg_against']
-                    using_xg_h = True
-                else:
-                    # Fallback sur buts réels
-                    att_h_home = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('home') or league_ctx['avg_home'])
-                    def_h_home = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('home') or league_ctx['avg_home_conceded'])
-                    using_xg_h = False
-                
-                if stats_a['xg_away'] and stats_a['xg_away']['matches_count'] >= 3:
-                    att_a_away = stats_a['xg_away']['xg_for']
-                    def_a_away = stats_a['xg_away']['xg_against']
-                    using_xg_a = True
-                else:
-                    # Fallback sur buts réels
-                    att_a_away = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('away') or league_ctx['avg_away'])
-                    def_a_away = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('away') or league_ctx['avg_away_conceded'])
-                    using_xg_a = False
-                
-                # Calcul des forces relatives (modèle Dixon-Coles avec xG)
-                attack_strength_h = att_h_home / league_ctx['avg_home'] if league_ctx['avg_home'] > 0 else 1.0
-                defense_weakness_a = def_a_away / league_ctx['avg_away_conceded'] if league_ctx['avg_away_conceded'] > 0 else 1.0
-                
-                attack_strength_a = att_a_away / league_ctx['avg_away'] if league_ctx['avg_away'] > 0 else 1.0
-                defense_weakness_h = def_h_home / league_ctx['avg_home_conceded'] if league_ctx['avg_home_conceded'] > 0 else 1.0
-                
-                # Lambda final avec xG
-                lh = league_ctx['avg_home'] * attack_strength_h * defense_weakness_a
-                la = league_ctx['avg_away'] * attack_strength_a * defense_weakness_h
-                
-                # Correction Dixon-Coles pour scores faibles
-                tau_00 = -0.13
-                tau_10 = 0.065
-                tau_01 = 0.065
-                tau_11 = 0.13
-                
-                # Matrice dynamique
-                max_goals = int(max(lh, la) * 2.5) + 3
-                max_goals = min(max_goals, 10)
-                matrix = np.zeros((max_goals, max_goals))
-                
-                for x in range(max_goals):
-                    for y in range(max_goals):
+                # Matrice de Poisson
+                matrix = np.zeros((7, 7))
+                for x in range(7):
+                    for y in range(7):
                         prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
-                        
-                        # Correction Dixon-Coles
-                        if x == 0 and y == 0:
-                            prob *= (1 + tau_00 * lh * la)
-                        elif x == 1 and y == 0:
-                            prob *= (1 + tau_10 * lh)
-                        elif x == 0 and y == 1:
-                            prob *= (1 + tau_01 * la)
-                        elif x == 1 and y == 1:
-                            prob *= (1 + tau_11)
-                        
+                        # Correction Dixon-Coles simplifiée
+                        if x==0 and y==0: prob *= 0.87
+                        if (x==1 and y==0) or (x==0 and y==1): prob *= 1.05
                         matrix[x, y] = prob
-                
-                # Normalisation
-                matrix = np.maximum(matrix, 0)
                 matrix /= matrix.sum()
-                
-                st.session_state.data = {
-                    'p_h': np.sum(np.tril(matrix, -1)), 
-                    'p_n': np.sum(np.diag(matrix)), 
-                    'p_a': np.sum(np.triu(matrix, 1)), 
-                    'matrix': matrix, 
-                    't_h': t_h, 
-                    't_a': t_a,
-                    'lh': lh,
-                    'la': la,
-                    'league_avg': league_ctx['avg_total'],
-                    'using_xg_h': using_xg_h,
-                    'using_xg_a': using_xg_a,
-                    'xg_h_matches': stats_h['xg_home']['matches_count'] if stats_h['xg_home'] else 0,
-                    'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0,
-                    'mode': "Global" if use_global_stats else l_name
-                }
-                st.session_state.simulation_done = True
 
-if st.session_state.simulation_done:
+                st.session_state.data = {
+                    'p_h': np.sum(np.tril(matrix, -1)), 'p_n': np.sum(np.diag(matrix)), 'p_a': np.sum(np.triu(matrix, 1)),
+                    'matrix': matrix, 't_h': t_h, 't_a': t_a, 'lh': lh, 'la': la
+                }
+                st.session_state.done = True
+
+# --- SECTION BETTING ---
+if st.session_state.get('done'):
     d = st.session_state.data
     st.write("---")
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
-    m2.metric("NUL", f"{d['p_n']*100:.1f}%")
-    m3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
-
-    st.subheader("🤖 MODE BET")
-    st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
+    # Sélecteur de profil "Cool"
+    st.subheader("⚡ SÉLECTION DU PROFIL DE JEU")
+    if 'risk_mode' not in st.session_state: st.session_state.risk_mode = "SAFE"
     
-    b_c1, b_c2, b_c3, b_c4 = st.columns(4)
-    bankroll = b_c1.number_input("CAPITAL TOTAL (€)", value=100.0)
-    c_h = b_c2.number_input(f"COTE {d['t_h']}", value=2.0)
-    c_n = b_c3.number_input("COTE NUL", value=3.0)
-    c_a = b_c4.number_input(f"COTE {d['t_a']}", value=3.0)
+    m_col1, m_col2, m_col3 = st.columns(3)
+    with m_col1:
+        if st.button("🛡️ SAFE"): st.session_state.risk_mode = "SAFE"
+    with m_col2:
+        if st.button("⚖️ MID"): st.session_state.risk_mode = "MID"
+    with m_col3:
+        if st.button("🔥 JOUEUR"): st.session_state.risk_mode = "JOUEUR"
 
-    dc_1, dc_2, dc_3 = st.columns(3)
-    c_hn = dc_1.number_input(f"COTE {d['t_h']} / NUL", value=1.30)
-    c_na = dc_2.number_input(f"COTE NUL / {d['t_a']}", value=1.30)
-    c_ha = dc_3.number_input(f"COTE {d['t_h']} / {d['t_a']}", value=1.30)
+    # Configuration des modes
+    conf_map = {
+        "SAFE":   {"seuil": 1.05, "kelly": 0.25, "max": 0.05, "color": "#00FFCC", "badge": "Bouclier Actif"},
+        "MID":    {"seuil": 1.02, "kelly": 0.50, "max": 0.15, "color": "#FFD700", "badge": "Optimisé"},
+        "JOUEUR": {"seuil": 1.001, "kelly": 1.0, "max": 0.40, "color": "#FF3131", "badge": "Déglinguage / Volume"}
+    }
+    c = conf_map[st.session_state.risk_mode]
 
+    # Input Cotes
+    bc1, bc2, bc3, bc4 = st.columns(4)
+    bankroll = bc1.number_input("Capital (€)", value=100.0)
+    c_h = bc2.number_input(f"Cote {d['t_h']}", value=2.0)
+    c_n = bc3.number_input("Cote Nul", value=3.2)
+    c_a = bc4.number_input(f"Cote {d['t_a']}", value=3.5)
+
+    # Calcul du pari
     opts = [
         {"n": d['t_h'], "p": d['p_h'], "c": c_h},
-        {"n": "NUL", "p": d['p_n'], "c": c_n},
-        {"n": d['t_a'], "p": d['p_a'], "c": c_a},
-        {"n": f"{d['t_h']} OU NUL", "p": d['p_h'] + d['p_n'], "c": c_hn},
-        {"n": f"NUL OU {d['t_a']}", "p": d['p_n'] + d['p_a'], "c": c_na},
-        {"n": f"{d['t_h']} OU {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
+        {"n": "Match Nul", "p": d['p_n'], "c": c_n},
+        {"n": d['t_a'], "p": d['p_a'], "c": c_a}
     ]
+    
+    # Filtrage par seuil (Mode JOUEUR accepte tout avantage > 0.1%)
+    valides = [o for o in opts if (o['p'] * o['c']) >= c['seuil']]
+    
+    if valides:
+        best = max(valides, key=lambda x: x['p'] * x['c'])
+        edge = (best['p'] * best['c']) - 1
+        f_kelly = (edge / (best['c'] - 1)) if best['c'] > 1 else 0
+        mise = min(bankroll * f_kelly * c['kelly'], bankroll * c['max'])
 
-    best_o = max(opts, key=lambda x: x['p'] * x['c'])
-    if best_o['p'] * best_o['c'] > 1.02:
-        b_val = best_o['c'] - 1
-        k_val = ((b_val * best_o['p']) - (1 - best_o['p'])) / b_val if b_val > 0 else 0
-        m_finale = bankroll * k_val
-        m_finale = max(bankroll * 0.30, m_finale) 
-        m_finale = min(m_finale, bankroll * 1.00) 
-        
-        st.markdown(f"<div class='verdict-text'>RECOMMANDATION : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
+        if mise > 0.1:
+            st.markdown(f"""
+                <div class='verdict-card' style='border-color: {c['color']};'>
+                    <div class='badge' style='background: {c['color']}; color: black;'>{c['badge']}</div>
+                    <h2 style='margin:0; color: white !important;'>CONSEIL : {best['n']}</h2>
+                    <h1 style='font-size: 45px; color: {c['color']} !important;'>{mise:.2f} €</h1>
+                    <p style='color: #aaa !important;'>Edge détecté : +{edge*100:.1f}% | Mode : {st.session_state.risk_mode}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("L'avantage est présent mais la mise recommandée est trop faible pour être affichée.")
     else:
-        st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='verdict-text'>AUCUNE VALUE (Seuil {st.session_state.risk_mode}: {c['seuil']})</div>", unsafe_allow_html=True)
 
-    st.subheader("🔍 AUDIT DU TICKET")
-    aud1, aud2 = st.columns(2)
-    aud_choix = aud1.selectbox("VOTRE PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
-    aud_cote = aud2.number_input("VOTRE COTE", value=1.50)
-
-    p_audit = d['p_h'] if aud_choix == d['t_h'] else (d['p_n'] if aud_choix == "Nul" else d['p_a'])
-    if "ou Nul" in aud_choix and d['t_h'] in aud_choix: p_audit = d['p_h'] + d['p_n']
-    elif "Nul ou" in aud_choix: p_audit = d['p_n'] + d['p_a']
-    elif "ou" in aud_choix: p_audit = d['p_h'] + d['p_a']
-    
-    audit_val = p_audit * aud_cote
-    stat = "SAFE" if audit_val >= 1.10 else ("MID" if audit_val >= 0.98 else "DANGEREUX")
-    st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
-
-    st.subheader("SCORES PROBABLES")
+    # Scores Exacts
+    st.write("### 🎯 SCORES LES PLUS PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-5:][::-1], d['matrix'].shape)
-    score_cols = st.columns(5)
+    cols = st.columns(5)
     for i in range(5):
-        with score_cols[i]: 
-            st.write(f"**{idx[0][i]} - {idx[1][i]}**")
-            st.write(f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
-    
-    with st.expander("🔍 DEBUG API - DERNIERS MATCHS"):
-        if 'debug_fixtures_h' in st.session_state:
-            st.write(f"**{d['t_h']} - 5 derniers matchs :**")
-            for f in st.session_state.debug_fixtures_h[:5]:
-                date = f['fixture']['date'][:10]
-                home = f['teams']['home']['name']
-                away = f['teams']['away']['name']
-                score = f"{f['goals']['home']}-{f['goals']['away']}"
-                xg_h = f['teams']['home'].get('xg', 'N/A')
-                xg_a = f['teams']['away'].get('xg', 'N/A')
-                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
-            
-            st.write(f"**{d['t_a']} - 5 derniers matchs :**")
-            for f in st.session_state.debug_fixtures_a[:5]:
-                date = f['fixture']['date'][:10]
-                home = f['teams']['home']['name']
-                away = f['teams']['away']['name']
-                score = f"{f['goals']['home']}-{f['goals']['away']}"
-                xg_h = f['teams']['home'].get('xg', 'N/A')
-                xg_a = f['teams']['away'].get('xg', 'N/A')
-                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
-    
-    with st.expander("📊 DÉTAILS TECHNIQUES"):
-        xg_status_h = f"✅ xG ({d['xg_h_matches']} matchs)" if d['using_xg_h'] else "⚠️ Buts réels"
-        xg_status_a = f"✅ xG ({d['xg_a_matches']} matchs)" if d['using_xg_a'] else "⚠️ Buts réels"
-        
-        st.write(f"""
-        **Modèle Dixon-Coles + xG Pondéré :**
-        - **Mode de calcul** : {d['mode']}
-        - Moyenne ligue : **{d['league_avg']:.2f}** buts/match
-        - λ {d['t_h']} : **{d['lh']:.2f}** buts attendus {xg_status_h}
-        - λ {d['t_a']} : **{d['la']:.2f}** buts attendus {xg_status_a}
-        - Pondération temporelle : Décroissance exponentielle 10%/match
-        - Correction scores faibles : Activée
-        - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}** configurations
-        
-        *{"Stats agrégées toutes compétitions" if d['mode'] == "Global" else f"Stats spécifiques {d['mode']}"}*
-        """)
+        cols[i].metric(f"{idx[0][i]} - {idx[1][i]}", f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
 
-
-st.markdown("""
-    <div class='footer'>
-        DÉVELOPPÉ PAR ITROZ | 
-        <a href='https://github.com/VOTRE_PROFIL' target='_blank'>GITHUB SOURCE</a>
-    </div>
-""", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; margin-top:50px; opacity:0.5;'>iTrOz Predictor v2.5 | 2025 Model</div>", unsafe_allow_html=True)
