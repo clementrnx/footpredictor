@@ -119,30 +119,19 @@ def get_api(endpoint, params):
 
 @st.cache_data(ttl=3600)
 def get_league_context(league_id, season):
-    """Récupère le contexte statistique de la ligue"""
     standings = get_api("standings", {"league": league_id, "season": season})
     if not standings or not standings[0].get('league', {}).get('standings'):
-        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
+        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_home_conceded': 1.2, 'avg_away_conceded': 1.5, 'avg_total': 2.7}
     
-    total_home_goals = 0
-    total_away_goals = 0
-    total_home_conceded = 0
-    total_away_conceded = 0
-    total_matches = 0
-    
+    total_home_goals, total_away_goals, total_home_conceded, total_away_conceded, total_matches = 0, 0, 0, 0, 0
     for team in standings[0]['league']['standings'][0]:
-        home_stats = team['home']
-        away_stats = team['away']
-        
-        total_home_goals += home_stats['goals']['for']
-        total_home_conceded += home_stats['goals']['against']
-        total_away_goals += away_stats['goals']['for']
-        total_away_conceded += away_stats['goals']['against']
-        total_matches += home_stats['played']
+        total_home_goals += team['home']['goals']['for']
+        total_home_conceded += team['home']['goals']['against']
+        total_away_goals += team['away']['goals']['for']
+        total_away_conceded += team['away']['goals']['against']
+        total_matches += team['home']['played']
     
-    if total_matches == 0:
-        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
-    
+    if total_matches == 0: return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
     return {
         'avg_home': total_home_goals / total_matches,
         'avg_away': total_away_goals / total_matches,
@@ -153,106 +142,47 @@ def get_league_context(league_id, season):
 
 @st.cache_data(ttl=1800)
 def get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=False):
-    """
-    Calcule les xG moyens pondérés temporellement
-    Les matchs récents ont plus de poids (décroissance exponentielle)
-    use_global=True : utilise toutes les compétitions
-    use_global=False : utilise uniquement la ligue choisie
-    """
-    if use_global:
-        # Toutes compétitions
-        fixtures = get_api("fixtures", {"team": team_id, "season": season, "last": 15})
-    else:
-        # Ligue spécifique
-        fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 10})
+    params = {"team": team_id, "season": season, "last": 15} if use_global else {"team": team_id, "league": league_id, "season": season, "last": 10}
+    fixtures = get_api("fixtures", params)
+    if not fixtures: return None
     
-    if not fixtures:
-        return None
-    
-    xg_for_weighted = 0
-    xg_against_weighted = 0
-    goals_for_weighted = 0
-    goals_against_weighted = 0
-    total_weight = 0
-    matches_count = 0
-    
-    # Tri par date (du plus récent au plus ancien)
+    xg_f_w, xg_a_w, total_w, count = 0, 0, 0, 0
     fixtures_sorted = sorted(fixtures, key=lambda x: x['fixture']['date'], reverse=True)
     
-    for idx, match in enumerate(fixtures_sorted):
-        if match['fixture']['status']['short'] != 'FT':
-            continue
-        
-        # Pondération exponentielle : match le plus récent = poids 1.0, décroissance de 10% par match
+    for idx, f in enumerate(fixtures_sorted):
+        if f['fixture']['status']['short'] != 'FT': continue
         weight = 0.9 ** idx
+        team_is_home = f['teams']['home']['id'] == team_id
+        if is_home != team_is_home: continue
         
-        # Déterminer si l'équipe jouait à domicile ou extérieur
-        team_is_home = match['teams']['home']['id'] == team_id
-        
-        # Filtrer selon le contexte demandé (domicile ou extérieur)
-        if is_home and not team_is_home:
-            continue
-        if not is_home and team_is_home:
-            continue
-        
-        # Récupérer les xG (Expected Goals)
         if team_is_home:
-            xg_for = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
-            xg_against = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
-            goals_for = match['goals']['home'] or 0
-            goals_against = match['goals']['away'] or 0
+            xg_f = float(f['teams']['home'].get('xg') or f['goals']['home'] or 0)
+            xg_a = float(f['teams']['away'].get('xg') or f['goals']['away'] or 0)
         else:
-            xg_for = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
-            xg_against = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
-            goals_for = match['goals']['away'] or 0
-            goals_against = match['goals']['home'] or 0
-        
-        # Accumuler avec pondération
-        xg_for_weighted += xg_for * weight
-        xg_against_weighted += xg_against * weight
-        goals_for_weighted += goals_for * weight
-        goals_against_weighted += goals_against * weight
-        total_weight += weight
-        matches_count += 1
+            xg_f = float(f['teams']['away'].get('xg') or f['goals']['away'] or 0)
+            xg_a = float(f['teams']['home'].get('xg') or f['goals']['home'] or 0)
+            
+        xg_f_w += xg_f * weight
+        xg_a_w += xg_a * weight
+        total_w += weight
+        count += 1
     
-    if total_weight == 0 or matches_count == 0:
-        return None
-    
-    return {
-        'xg_for': xg_for_weighted / total_weight,
-        'xg_against': xg_against_weighted / total_weight,
-        'goals_for': goals_for_weighted / total_weight,
-        'goals_against': goals_against_weighted / total_weight,
-        'matches_count': matches_count
-    }
+    return {'xg_for': xg_f_w/total_w, 'xg_against': xg_a_w/total_w, 'matches_count': count} if total_w > 0 else None
 
 @st.cache_data(ttl=1800)
 def get_comprehensive_stats(team_id, league_id, season, use_global=False):
-    """Récupère les stats complètes incluant xG pondéré"""
-    # Stats globales de l'équipe
-    base_stats = get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id})
-    
-    # xG pondérés
-    xg_home = get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=use_global)
-    xg_away = get_weighted_xg_stats(team_id, league_id, season, is_home=False, use_global=use_global)
-    
     return {
-        'base': base_stats,
-        'xg_home': xg_home,
-        'xg_away': xg_away
+        'base': get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id}),
+        'xg_home': get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=use_global),
+        'xg_away': get_weighted_xg_stats(team_id, league_id, season, is_home=False, use_global=use_global)
     }
 
-if 'simulation_done' not in st.session_state:
-    st.session_state.simulation_done = False
-    st.session_state.data = {}
-
+# --- MAIN INTERFACE ---
 st.title("ITROZ PREDICTOR")
 
-# Toggle Mode en haut + Agressivité
 col_toggle, col_aggr, col_league = st.columns([1, 1, 2])
 with col_toggle:
-    use_global_stats = st.toggle("📊 MODE GLOBAL", value=False, help="Utilise les stats toutes compétitions au lieu des stats spécifiques à la ligue")
-
+    use_global_stats = st.toggle("📊 MODE GLOBAL", value=False)
 with col_aggr:
     aggressivity = st.select_slider("🎲 MODE", options=["PRUDENT", "ÉQUILIBRÉ", "JOUEUR", "RISQUÉ"], value="JOUEUR")
 
@@ -265,254 +195,73 @@ teams_res = get_api("teams", {"league": l_id, "season": SEASON})
 teams = {t['team']['name']: t['team']['id'] for t in teams_res}
 
 if teams:
-    sorted_team_names = sorted(teams.keys())
-    
-    idx_barca = 0
-    idx_real = 1
-    
-    for i, name in enumerate(sorted_team_names):
-        if "Barcelona" in name: idx_barca = i
-        if "Real Madrid" in name: idx_real = i
+    sorted_names = sorted(teams.keys())
+    idx_h = next((i for i, n in enumerate(sorted_names) if "Barcelona" in n), 0)
+    idx_a = next((i for i, n in enumerate(sorted_names) if "Real Madrid" in n), 1)
 
     c1, c2 = st.columns(2)
-    t_h = c1.selectbox("DOMICILE", sorted_team_names, index=idx_barca)
-    t_a = c2.selectbox("EXTÉRIEUR", sorted_team_names, index=idx_real)
+    t_h = c1.selectbox("DOMICILE", sorted_names, index=idx_h)
+    t_a = c2.selectbox("EXTÉRIEUR", sorted_names, index=idx_a)
 
     if st.button("Lancer la prédiction"):
         id_h, id_a = teams[t_h], teams[t_a]
-        
-        mode_text = "MODE GLOBAL (toutes compétitions)" if use_global_stats else f"MODE CONTEXTE ({l_name})"
-        with st.spinner(f"🔍 Analyse xG pondérée + forme récente [{mode_text}]..."):
-            # Contexte de la ligue
-            league_ctx = get_league_context(l_id, SEASON)
+        with st.spinner("Analyse en cours..."):
+            l_ctx = get_league_context(l_id, SEASON)
+            s_h = get_comprehensive_stats(id_h, l_id, SEASON, use_global_stats)
+            s_a = get_comprehensive_stats(id_a, l_id, SEASON, use_global_stats)
             
-            # Stats complètes avec xG pondéré
-            stats_h = get_comprehensive_stats(id_h, l_id, SEASON, use_global=use_global_stats)
-            stats_a = get_comprehensive_stats(id_a, l_id, SEASON, use_global=use_global_stats)
-            
-            # Stocker pour debug
-            if use_global_stats:
-                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "season": SEASON, "last": 5})
-                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "season": SEASON, "last": 5})
-            else:
-                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "league": l_id, "season": SEASON, "last": 5})
-                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "league": l_id, "season": SEASON, "last": 5})
-            
-            if stats_h and stats_a:
-                s_h = stats_h['base']
-                s_a = stats_a['base']
-                
-                # PRIORITÉ 1 : Utiliser xG pondéré si disponible
-                if stats_h['xg_home'] and stats_h['xg_home']['matches_count'] >= 3:
-                    att_h_home = stats_h['xg_home']['xg_for']
-                    def_h_home = stats_h['xg_home']['xg_against']
-                    using_xg_h = True
-                else:
-                    # Fallback sur buts réels
-                    att_h_home = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('home') or league_ctx['avg_home'])
-                    def_h_home = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('home') or league_ctx['avg_home_conceded'])
-                    using_xg_h = False
-                
-                if stats_a['xg_away'] and stats_a['xg_away']['matches_count'] >= 3:
-                    att_a_away = stats_a['xg_away']['xg_for']
-                    def_a_away = stats_a['xg_away']['xg_against']
-                    using_xg_a = True
-                else:
-                    # Fallback sur buts réels
-                    att_a_away = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('away') or league_ctx['avg_away'])
-                    def_a_away = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('away') or league_ctx['avg_away_conceded'])
-                    using_xg_a = False
-                
-                # Calcul des forces relatives (modèle Dixon-Coles avec xG)
-                attack_strength_h = att_h_home / league_ctx['avg_home'] if league_ctx['avg_home'] > 0 else 1.0
-                defense_weakness_a = def_a_away / league_ctx['avg_away_conceded'] if league_ctx['avg_away_conceded'] > 0 else 1.0
-                
-                attack_strength_a = att_a_away / league_ctx['avg_away'] if league_ctx['avg_away'] > 0 else 1.0
-                defense_weakness_h = def_h_home / league_ctx['avg_home_conceded'] if league_ctx['avg_home_conceded'] > 0 else 1.0
-                
-                # Lambda final avec xG
-                lh = league_ctx['avg_home'] * attack_strength_h * defense_weakness_a
-                la = league_ctx['avg_away'] * attack_strength_a * defense_weakness_h
-                
-                # Correction Dixon-Coles pour scores faibles
-                tau_00 = -0.13
-                tau_10 = 0.065
-                tau_01 = 0.065
-                tau_11 = 0.13
-                
-                # Matrice dynamique
-                max_goals = int(max(lh, la) * 2.5) + 3
-                max_goals = min(max_goals, 10)
-                matrix = np.zeros((max_goals, max_goals))
-                
-                for x in range(max_goals):
-                    for y in range(max_goals):
-                        prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
-                        
-                        # Correction Dixon-Coles
-                        if x == 0 and y == 0:
-                            prob *= (1 + tau_00 * lh * la)
-                        elif x == 1 and y == 0:
-                            prob *= (1 + tau_10 * lh)
-                        elif x == 0 and y == 1:
-                            prob *= (1 + tau_01 * la)
-                        elif x == 1 and y == 1:
-                            prob *= (1 + tau_11)
-                        
-                        matrix[x, y] = prob
-                
-                # Normalisation
-                matrix = np.maximum(matrix, 0)
-                matrix /= matrix.sum()
-                
-                st.session_state.data = {
-                    'p_h': np.sum(np.tril(matrix, -1)), 
-                    'p_n': np.sum(np.diag(matrix)), 
-                    'p_a': np.sum(np.triu(matrix, 1)), 
-                    'matrix': matrix, 
-                    't_h': t_h, 
-                    't_a': t_a,
-                    'lh': lh,
-                    'la': la,
-                    'league_avg': league_ctx['avg_total'],
-                    'using_xg_h': using_xg_h,
-                    'using_xg_a': using_xg_a,
-                    'xg_h_matches': stats_h['xg_home']['matches_count'] if stats_h['xg_home'] else 0,
-                    'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0,
-                    'mode': "Global" if use_global_stats else l_name,
-                    'aggressivity': aggressivity
-                }
-                st.session_state.simulation_done = True
+            # Calcul λ (Poisson)
+            att_h = s_h['xg_home']['xg_for'] if s_h['xg_home'] else l_ctx['avg_home']
+            def_h = s_h['xg_home']['xg_against'] if s_h['xg_home'] else l_ctx['avg_home_conceded']
+            att_a = s_a['xg_away']['xg_for'] if s_a['xg_away'] else l_ctx['avg_away']
+            def_a = s_a['xg_away']['xg_against'] if s_a['xg_away'] else l_ctx['avg_away_conceded']
+
+            lh = l_ctx['avg_home'] * (att_h / l_ctx['avg_home']) * (def_a / l_ctx['avg_away_conceded'])
+            la = l_ctx['avg_away'] * (att_a / l_ctx['avg_away']) * (def_h / l_ctx['avg_home_conceded'])
+
+            # Matrice Dixon-Coles
+            matrix = np.zeros((8, 8))
+            for x in range(8):
+                for y in range(8):
+                    prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
+                    if x==0 and y==0: prob *= 0.87
+                    elif (x==1 and y==0) or (x==0 and y==1): prob *= 1.06
+                    matrix[x,y] = prob
+            matrix /= matrix.sum()
+
+            st.session_state.data = {
+                'p_h': np.sum(np.tril(matrix, -1)), 'p_n': np.sum(np.diag(matrix)), 'p_a': np.sum(np.triu(matrix, 1)),
+                'matrix': matrix, 't_h': t_h, 't_a': t_a, 'lh': lh, 'la': la, 'aggressivity': aggressivity
+            }
+            st.session_state.simulation_done = True
 
 if st.session_state.simulation_done:
     d = st.session_state.data
     st.write("---")
-    
-    m1, m2, m3 = st.columns(3)
-    m1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
-    m2.metric("NUL", f"{d['p_n']*100:.1f}%")
-    m3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
+    col1, col2, col3 = st.columns(3)
+    col1.metric(d['t_h'], f"{d['p_h']*100:.1f}%")
+    col2.metric("NUL", f"{d['p_n']*100:.1f}%")
+    col3.metric(d['t_a'], f"{d['p_a']*100:.1f}%")
 
     st.subheader("🤖 MODE BET")
     st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
+    bankroll = st.number_input("CAPITAL TOTAL (€)", value=100.0)
     
-    b_c1, b_c2, b_c3, b_c4 = st.columns(4)
-    bankroll = b_c1.number_input("CAPITAL TOTAL (€)", value=100.0)
-    c_h = b_c2.number_input(f"COTE {d['t_h']}", value=2.0)
-    c_n = b_c3.number_input("COTE NUL", value=3.0)
-    c_a = b_c4.number_input(f"COTE {d['t_a']}", value=3.0)
-
-    dc_1, dc_2, dc_3 = st.columns(3)
-    c_hn = dc_1.number_input(f"COTE {d['t_h']} / NUL", value=1.30)
-    c_na = dc_2.number_input(f"COTE NUL / {d['t_a']}", value=1.30)
-    c_ha = dc_3.number_input(f"COTE {d['t_h']} / {d['t_a']}", value=1.30)
-
-    # Seuils ajustés selon l'agressivité
-    thresholds = {
-        "PRUDENT": 1.08,      # Très conservateur
-        "ÉQUILIBRÉ": 1.00,    # Value positive uniquement
-        "JOUEUR": 0.92,       # Accepte value légèrement négative
-        "RISQUÉ": 0.82        # Très agressif
-    }
-    
-    kelly_multipliers = {
-        "PRUDENT": 0.20,      # 20% du Kelly
-        "ÉQUILIBRÉ": 0.40,    # 40% du Kelly
-        "JOUEUR": 0.65,       # 65% du Kelly
-        "RISQUÉ": 0.85        # 85% du Kelly
-    }
-    
-    threshold = thresholds[d['aggressivity']]
-    kelly_mult = kelly_multipliers[d['aggressivity']]
-
-    opts = [
-        {"n": d['t_h'], "p": d['p_h'], "c": c_h},
-        {"n": "NUL", "p": d['p_n'], "c": c_n},
-        {"n": d['t_a'], "p": d['p_a'], "c": c_a},
-        {"n": f"{d['t_h']} OU NUL", "p": d['p_h'] + d['p_n'], "c": c_hn},
-        {"n": f"NUL OU {d['t_a']}", "p": d['p_n'] + d['p_a'], "c": c_na},
-        {"n": f"{d['t_h']} OU {d['t_a']}", "p": d['p_h'] + d['p_a'], "c": c_ha}
-    ]
-
-    best_o = max(opts, key=lambda x: x['p'] * x['c'])
-    ev = best_o['p'] * best_o['c']
-    
-    if ev > threshold:
-        b_val = best_o['c'] - 1
-        k_val = ((b_val * best_o['p']) - (1 - best_o['p'])) / b_val if b_val > 0 else 0
-        k_val = max(k_val, 0.01)  # Minimum 1% du bankroll
-        
-        m_finale = bankroll * k_val * kelly_mult
-        m_finale = max(bankroll * 0.05, m_finale)  # Minimum 5% du bankroll
-        m_finale = min(m_finale, bankroll * 0.50)  # Maximum 50% du bankroll
-        
-        # Confiance basée sur l'EV
-        if ev >= 1.15:
-            confidence = "🔥 FORTE"
-        elif ev >= 1.05:
-            confidence = "✅ BONNE"
-        elif ev >= 0.95:
-            confidence = "⚠️ MOYENNE"
-        else:
-            confidence = "⚡ SPÉCULATIVE"
-        
-        st.markdown(f"<div class='verdict-text'>{confidence} | {best_o['n']} | MISE : {m_finale:.2f}€ | EV: {ev:.2f}</div>", unsafe_allow_html=True)
-        
-        # Afficher les alternatives proches
-        alternatives = [o for o in opts if o != best_o and o['p'] * o['c'] > threshold * 0.95]
-        if alternatives:
-            st.write("**💡 ALTERNATIVES INTÉRESSANTES :**")
-            for alt in alternatives[:2]:
-                alt_ev = alt['p'] * alt['c']
-                st.write(f"- {alt['n']} (cote {alt['c']:.2f}) | EV: {alt_ev:.2f}")
+    # Kelly & EV Logic
+    c_h = st.number_input(f"COTE {d['t_h']}", value=2.0)
+    ev = d['p_h'] * c_h
+    if ev > 1.05:
+        st.markdown(f"<div class='verdict-text'>IA RECOMMANDE : {d['t_h']} | EV: {ev:.2f}</div>", unsafe_allow_html=True)
     else:
-        st.markdown(f"<div class='verdict-text'>❌ PAS DE VALUE DÉTECTÉ | Meilleur EV: {ev:.2f} (seuil: {threshold:.2f})</div>", unsafe_allow_html=True)
-        
-        # Toujours montrer le meilleur pari même sans value
-        if ev > 0.75:
-            st.write(f"**🎲 PARI LE MOINS MAUVAIS :** {best_o['n']} (mais en dessous du seuil {d['aggressivity']})")
-    
+        st.markdown("<div class='verdict-text'>AUCUNE VALUE CLAIRE</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
-
-    st.subheader("🔍 AUDIT DU TICKET")
-    aud1, aud2 = st.columns(2)
-    aud_choix = aud1.selectbox("VOTRE PARI", [d['t_h'], "Nul", d['t_a'], f"{d['t_h']} ou Nul", f"Nul ou {d['t_a']}", f"{d['t_h']} ou {d['t_a']}"])
-    aud_cote = aud2.number_input("VOTRE COTE", value=1.50)
-
-    p_audit = d['p_h'] if aud_choix == d['t_h'] else (d['p_n'] if aud_choix == "Nul" else d['p_a'])
-    if "ou Nul" in aud_choix and d['t_h'] in aud_choix: p_audit = d['p_h'] + d['p_n']
-    elif "Nul ou" in aud_choix: p_audit = d['p_n'] + d['p_a']
-    elif "ou" in aud_choix: p_audit = d['p_h'] + d['p_a']
-    
-    audit_val = p_audit * aud_cote
-    
-    # Audit adapté au mode
-    if d['aggressivity'] == "PRUDENT":
-        stat = "✅ EXCELLENT" if audit_val >= 1.10 else ("⚠️ ACCEPTABLE" if audit_val >= 1.00 else "❌ À ÉVITER")
-    elif d['aggressivity'] == "ÉQUILIBRÉ":
-        stat = "✅ TRÈS BON" if audit_val >= 1.05 else ("✅ BON" if audit_val >= 0.98 else "⚠️ RISQUÉ")
-    elif d['aggressivity'] == "JOUEUR":
-        stat = "🔥 PARFAIT" if audit_val >= 1.05 else ("✅ JOUABLE" if audit_val >= 0.90 else "⚠️ LIMITE")
-    else:  # RISQUÉ
-        stat = "🔥 GO" if audit_val >= 1.00 else ("⚡ ACCEPTABLE" if audit_val >= 0.80 else "⚠️ TRÈS RISQUÉ")
-    
-    st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
 
     st.subheader("SCORES PROBABLES")
     idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-5:][::-1], d['matrix'].shape)
     score_cols = st.columns(5)
     for i in range(5):
-        with score_cols[i]: 
+        with score_cols[i]:
             st.write(f"**{idx[0][i]} - {idx[1][i]}**")
             st.write(f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
-    
-    with st.expander("🔍 DEBUG API - DERNIERS MATCHS"):
-        if 'debug_fixtures_h' in st.session_state:
-            st.write(f"**{d['t_h']} - 5 derniers matchs :**")
-            for f in st.session_state.debug_fixtures_h[:5]:
-                date = f['fixture']['date'][:10]
-                home = f['teams']['home']['name']
-                away = f['teams']['away']['name']
-                score = f"{f['goals']['home']}-{f['goals']['away']}"
-                xg_h = f['teams']['home'].get('xg', 'N/A')
-                xg_a = f['teams']['away'].get('xg
+
+st.markdown("<div class='footer'>DÉVELOPPÉ PAR ITROZ | <a href='#'>GITHUB SOURCE</a></div>", unsafe_allow_html=True)
