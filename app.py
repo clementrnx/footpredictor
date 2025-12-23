@@ -6,7 +6,7 @@ from scipy.stats import poisson
 from datetime import datetime
 
 # --- CONFIGURATION ET STYLE FINAL EDITION ---
-st.set_page_config(page_title="Clementrnxx Predictor V5.5 ", layout="wide")
+st.set_page_config(page_title="Clementrnxx Predictor V5.6 ", layout="wide")
 
 st.markdown("""
     <style>
@@ -123,7 +123,7 @@ def get_lambda(team_id, league_id):
 
 # --- UI ---
 st.title("🏆 CLEMENTRNXX PREDICTOR ")
-st.subheader("V5.6 aka VF")
+st.subheader("V5.6")
 
 tab1, tab2 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS"])
 
@@ -239,5 +239,5 @@ st.markdown("""
     <a href="https://github.com/clementrnx" class="github-link" target="_blank">
         GITHUB : github.com/clementrnx
     </a>
-    <p style='text-align:center; opacity:0.4; font-size:10px;'>Clementrnxx Predictor V5.5 - Final Edition</p>
+    <p style='text-align:center; opacity:0.4; font-size:10px;'>Clementrnxx Predictor V5.6 - Final Edition</p>
 """, unsafe_allow_html=True)
