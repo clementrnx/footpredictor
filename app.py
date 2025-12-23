@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 
 # --- CONFIGURATION CLEMENTRNXX PREDICTOR V5.5 ---
-st.set_page_config(page_title="Clementrnxx Predictor V5.5 - Final Edition", layout="wide")
+st.set_page_config(page_title="Clementrnxx Predictor V5.5 ", layout="wide")
 
 st.markdown("""
     <style>
@@ -81,10 +81,10 @@ def get_api(endpoint, params):
     except: return []
 
 # --- UI ---
-st.title("🏆 CLEMENTRNXX PREDICTOR V5.5")
+st.title(" CLEMENTRNXX PREDICTOR V5.5")
 st.subheader("FINAL EDITION")
 
-tab1, tab2, tab3 = st.tabs(["🎯 ANALYSE 1VS1", "🚀 SCANNER DE TICKETS", "📊 STATS"])
+tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
 
 with tab1:
     l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()))
@@ -109,19 +109,19 @@ with tab1:
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
-        st.subheader("💰 MODULE BET")
+        st.subheader(" MODULE BET")
         b1, b2, b3 = st.columns(3)
         c_1 = b1.number_input(f"Cote {th}", value=1.0)
         c_n = b2.number_input("Cote Nul", value=1.0)
         c_2 = b3.number_input(f"Cote {ta}", value=1.0)
         
-        st.subheader("🔢 TOP SCORES")
+        st.subheader("TOP SCORES")
         idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
         sc = st.columns(5)
         for i in range(5): sc[i].markdown(f"<div class='score-card'><b>{idx[0][i]} - {idx[1][i]}</b><br>{r['matrix'][idx[0][i],idx[1][i]]*100:.1f}%</div>", unsafe_allow_html=True)
 
 with tab2:
-    st.subheader("🚀 GÉNÉRATEUR DE TICKETS")
+    st.subheader(" GÉNÉRATEUR DE TICKETS")
     gc1, gc2, gc3 = st.columns(3)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
     d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
@@ -131,7 +131,7 @@ with tab2:
     risk_mode = st.select_slider("RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
     risk_cfg = {"SAFE": {"p": 0.82, "ev": 1.02, "legs": 2}, "MID-SAFE": {"p": 0.74, "ev": 1.05, "legs": 3}, "MID": {"p": 0.64, "ev": 1.08, "legs": 4}, "MID-AGGRESSIF": {"p": 0.52, "ev": 1.12, "legs": 5}, "AGGRESSIF": {"p": 0.42, "ev": 1.15, "legs": 7}}[risk_mode]
     
-    if st.button("GÉNÉRER ET ENVOYER SUR DISCORD"):
+    if st.button("GÉNÉRER "):
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
@@ -168,7 +168,7 @@ with tab2:
             st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{total_odd:.2f}</div>", unsafe_allow_html=True)
             st.table(final_ticket)
             send_to_discord(final_ticket, total_odd, risk_mode)
-            st.toast("✅ Ticket envoyé sur Discord !")
+            st.toast("✅ Ticket publié avec succès !")
         else: st.error("Aucune opportunité trouvée.")
 
 with tab3:
