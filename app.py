@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import numpy as np
 from scipy.stats import poisson
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import time
 
@@ -166,7 +166,10 @@ with tab2:
     st.subheader(" GÉNÉRATEUR DE TICKETS")
     gc1, gc2, gc3, gc4 = st.columns(4)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
-    d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
+    
+    # MODIFICATION : Période (Date début et Date fin)
+    d_range = gc2.date_input("PÉRIODE DU SCAN", [datetime.now(), datetime.now()], key="d_scan_range")
+    
     bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
     scope_scan = gc4.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
     
@@ -175,38 +178,60 @@ with tab2:
     risk_cfg = RISK_LEVELS[risk_mode]
     
     if st.button("GÉNÉRER "):
+        # Extraction de la période
+        if isinstance(d_range, list) and len(d_range) == 2:
+            start_date, end_date = d_range
+        elif isinstance(d_range, list) and len(d_range) == 1:
+            start_date = end_date = d_range[0]
+        else:
+            start_date = end_date = d_range
+
+        date_list = pd.date_range(start=start_date, end=end_date).tolist()
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
-        for lid in lids:
-            fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": d_scan.strftime('%Y-%m-%d')})
-            for f in fixtures:
-                if f['fixture']['status']['short'] != "NS": continue
-                att_h, def_h = get_team_stats(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL")
-                att_a, def_a = get_team_stats(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL")
-                lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
-                pr, h_n, a_n = calculate_perfect_probs(lh, la), f['teams']['home']['name'], f['teams']['away']['name']
-                
-                tests = []
-                if "ISSUE SIMPLE" in selected_markets:
-                    tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
-                if "DOUBLE CHANCE" in selected_markets:
-                    tests += [(f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away")]
-                if "BTTS (OUI/NON)" in selected_markets:
-                    tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
+        
+        progress_bar = st.progress(0)
+        
+        for idx, current_date in enumerate(date_list):
+            date_str = current_date.strftime('%Y-%m-%d')
+            for lid in lids:
+                fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": date_str})
+                for f in fixtures:
+                    if f['fixture']['status']['short'] != "NS": continue
+                    att_h, def_h = get_team_stats(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL")
+                    att_a, def_a = get_team_stats(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL")
+                    lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
+                    pr, h_n, a_n = calculate_perfect_probs(lh, la), f['teams']['home']['name'], f['teams']['away']['name']
+                    
+                    tests = []
+                    if "ISSUE SIMPLE" in selected_markets:
+                        tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
+                    if "DOUBLE CHANCE" in selected_markets:
+                        tests += [(f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away")]
+                    if "BTTS (OUI/NON)" in selected_markets:
+                        tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
 
-                for lbl, p, m_n, m_v in tests:
-                    if p >= risk_cfg['p']:
-                        odds_data = get_api("odds", {"fixture": f['fixture']['id']})
-                        if odds_data and odds_data[0]['bookmakers']:
-                            for btt in odds_data[0]['bookmakers'][0]['bets']:
-                                if btt['name'] == m_n:
-                                    for o in btt['values']:
-                                        if o['value'] == m_v:
-                                            try:
-                                                ct = float(o['odd'])
-                                                if (p * ct) >= risk_cfg['ev']:
-                                                    opps.append({"MATCH": f"{h_n}-{a_n}", "PARI": lbl, "COTE": ct, "PROBA": f"{p*100:.1f}%", "VALUE": p*ct})
-                                            except: continue
+                    for lbl, p, m_n, m_v in tests:
+                        if p >= risk_cfg['p']:
+                            odds_data = get_api("odds", {"fixture": f['fixture']['id']})
+                            if odds_data and odds_data[0]['bookmakers']:
+                                for btt in odds_data[0]['bookmakers'][0]['bets']:
+                                    if btt['name'] == m_n:
+                                        for o in btt['values']:
+                                            if o['value'] == m_v:
+                                                try:
+                                                    ct = float(o['odd'])
+                                                    if (p * ct) >= risk_cfg['ev']:
+                                                        opps.append({
+                                                            "DATE": date_str,
+                                                            "MATCH": f"{h_n}-{a_n}", 
+                                                            "PARI": lbl, 
+                                                            "COTE": ct, 
+                                                            "PROBA": f"{p*100:.1f}%", 
+                                                            "VALUE": p*ct
+                                                        })
+                                                except: continue
+            progress_bar.progress((idx + 1) / len(date_list))
         
         final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
         if final_ticket:
