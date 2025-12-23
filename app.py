@@ -311,3 +311,9 @@ if st.session_state.simulation_done or 'data' in st.session_state:
     st.write(f"- {d['t_a']} gagne: {d['p_a']*100:.1f}%")
 
 st.markdown("""
+    <div class='footer'>
+        DÉVELOPPÉ PAR ITROZ | 
+        <a href='https://github.com/VOTRE_PROFIL' target='_blank'>GITHUB SOURCE</a>
+    </div>
+""", unsafe_allow_html=True)  # <- bien fermé ici
+
