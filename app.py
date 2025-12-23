@@ -152,12 +152,19 @@ def get_league_context(league_id, season):
     }
 
 @st.cache_data(ttl=1800)
-def get_weighted_xg_stats(team_id, league_id, season, is_home=True):
+def get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=False):
     """
     Calcule les xG moyens pondérés temporellement
     Les matchs récents ont plus de poids (décroissance exponentielle)
+    use_global=True : utilise toutes les compétitions
+    use_global=False : utilise uniquement la ligue choisie
     """
-    fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 10})
+    if use_global:
+        # Toutes compétitions
+        fixtures = get_api("fixtures", {"team": team_id, "season": season, "last": 15})
+    else:
+        # Ligue spécifique
+        fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 10})
     
     if not fixtures:
         return None
@@ -220,14 +227,14 @@ def get_weighted_xg_stats(team_id, league_id, season, is_home=True):
     }
 
 @st.cache_data(ttl=1800)
-def get_comprehensive_stats(team_id, league_id, season):
+def get_comprehensive_stats(team_id, league_id, season, use_global=False):
     """Récupère les stats complètes incluant xG pondéré"""
     # Stats globales de l'équipe
     base_stats = get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id})
     
     # xG pondérés
-    xg_home = get_weighted_xg_stats(team_id, league_id, season, is_home=True)
-    xg_away = get_weighted_xg_stats(team_id, league_id, season, is_home=False)
+    xg_home = get_weighted_xg_stats(team_id, league_id, season, is_home=True, use_global=use_global)
+    xg_away = get_weighted_xg_stats(team_id, league_id, season, is_home=False, use_global=use_global)
     
     return {
         'base': base_stats,
@@ -241,8 +248,14 @@ if 'simulation_done' not in st.session_state:
 
 st.title("ITROZ PREDICTOR")
 
+# Toggle Mode en haut
+col_toggle, col_league = st.columns([1, 3])
+with col_toggle:
+    use_global_stats = st.toggle("📊 MODE GLOBAL", value=False, help="Utilise les stats toutes compétitions au lieu des stats spécifiques à la ligue")
+
 leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
-l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
+with col_league:
+    l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
 l_id = leagues[l_name]
 
 teams_res = get_api("teams", {"league": l_id, "season": SEASON})
@@ -265,13 +278,14 @@ if teams:
     if st.button("Lancer la prédiction"):
         id_h, id_a = teams[t_h], teams[t_a]
         
-        with st.spinner("🔍 Analyse xG pondérée + forme récente..."):
+        mode_text = "MODE GLOBAL (toutes compétitions)" if use_global_stats else f"MODE CONTEXTE ({l_name})"
+        with st.spinner(f"🔍 Analyse xG pondérée + forme récente [{mode_text}]..."):
             # Contexte de la ligue
             league_ctx = get_league_context(l_id, SEASON)
             
             # Stats complètes avec xG pondéré
-            stats_h = get_comprehensive_stats(id_h, l_id, SEASON)
-            stats_a = get_comprehensive_stats(id_a, l_id, SEASON)
+            stats_h = get_comprehensive_stats(id_h, l_id, SEASON, use_global=use_global_stats)
+            stats_a = get_comprehensive_stats(id_a, l_id, SEASON, use_global=use_global_stats)
             
             if stats_h and stats_a:
                 s_h = stats_h['base']
@@ -353,7 +367,8 @@ if teams:
                     'using_xg_h': using_xg_h,
                     'using_xg_a': using_xg_a,
                     'xg_h_matches': stats_h['xg_home']['matches_count'] if stats_h['xg_home'] else 0,
-                    'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0
+                    'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0,
+                    'mode': "Global" if use_global_stats else l_name
                 }
                 st.session_state.simulation_done = True
 
@@ -430,6 +445,7 @@ if st.session_state.simulation_done:
         
         st.write(f"""
         **Modèle Dixon-Coles + xG Pondéré :**
+        - **Mode de calcul** : {d['mode']}
         - Moyenne ligue : **{d['league_avg']:.2f}** buts/match
         - λ {d['t_h']} : **{d['lh']:.2f}** buts attendus {xg_status_h}
         - λ {d['t_a']} : **{d['la']:.2f}** buts attendus {xg_status_a}
@@ -437,8 +453,9 @@ if st.session_state.simulation_done:
         - Correction scores faibles : Activée
         - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}** configurations
         
-        *Les matchs récents ont plus de poids dans le calcul*
+        *{"Stats agrégées toutes compétitions" if d['mode'] == "Global" else f"Stats spécifiques {d['mode']}"}*
         """)
+
 
 st.markdown("""
     <div class='footer'>
