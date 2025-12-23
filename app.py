@@ -102,8 +102,6 @@ with tab1:
     
     if teams:
         c1, c2 = st.columns(2)
-        th = sorted(teams.keys())[0] if teams else ""
-        ta = sorted(teams.keys())[1] if len(teams) > 1 else th
         team_h = c1.selectbox("DOMICILE", sorted(teams.keys()), key="th_1v1")
         team_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="ta_1v1")
         if st.button("LANCER L'ANALYSE"):
@@ -159,11 +157,6 @@ with tab1:
         else:
             st.warning("⚠️ AUCUN PARI NE CORRESPOND À VOS CRITÈRES DE RISQUE ACTUELS.")
 
-        st.subheader("TOP SCORES")
-        idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
-        sc = st.columns(5)
-        for i in range(5): sc[i].markdown(f"<div class='score-card'><b>{idx[0][i]} - {idx[1][i]}</b><br>{r['matrix'][idx[0][i],idx[1][i]]*100:.1f}%</div>", unsafe_allow_html=True)
-
 with tab2:
     st.subheader(" GÉNÉRATEUR DE TICKETS")
     gc1, gc2, gc3, gc4 = st.columns(4)
@@ -181,7 +174,7 @@ with tab2:
             start_date, end_date = d_range
             date_list = pd.date_range(start=start_date, end=end_date).tolist()
         else:
-            st.error("⚠️ Veuillez sélectionner une période complète (Début et Fin).")
+            st.error("⚠️ Veuillez sélectionner une période complète.")
             st.stop()
 
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
@@ -199,6 +192,7 @@ with tab2:
                     lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
                     pr, h_n, a_n = calculate_perfect_probs(lh, la), f['teams']['home']['name'], f['teams']['away']['name']
                     
+                    # Définition des tests avec correspondance exacte API
                     tests = []
                     if "ISSUE SIMPLE" in selected_markets:
                         tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
@@ -208,28 +202,30 @@ with tab2:
                         tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
 
                     for lbl, p, m_n, m_v in tests:
+                        # Si la probabilité est suffisante, on cherche la cote
                         if p >= risk_cfg['p']:
                             odds_data = get_api("odds", {"fixture": f['fixture']['id']})
-                            if odds_data and odds_data[0]['bookmakers']:
-                                for btt in odds_data[0]['bookmakers'][0]['bets']:
-                                    if btt['name'] == m_n:
-                                        for o in btt['values']:
-                                            if o['value'] == m_v:
-                                                try:
-                                                    ct = float(o['odd'])
-                                                    if (p * ct) >= risk_cfg['ev']:
-                                                        opps.append({
-                                                            "DATE": date_str,
-                                                            "MATCH": f"{h_n}-{a_n}", 
-                                                            "PARI": lbl, 
-                                                            "COTE": ct, 
-                                                            "PROBA": f"{p*100:.1f}%", 
-                                                            "VALUE": p*ct
-                                                        })
-                                                except: continue
+                            if odds_data:
+                                for bookmaker in odds_data[0].get('bookmakers', []):
+                                    for bet in bookmaker.get('bets', []):
+                                        if bet['name'] == m_n:
+                                            for val in bet['values']:
+                                                if val['value'] == m_v:
+                                                    try:
+                                                        ct = float(val['odd'])
+                                                        if (p * ct) >= risk_cfg['ev']:
+                                                            opps.append({
+                                                                "DATE": date_str,
+                                                                "MATCH": f"{h_n} - {a_n}", 
+                                                                "PARI": lbl, 
+                                                                "COTE": ct, 
+                                                                "PROBA": f"{p*100:.1f}%", 
+                                                                "VALUE": p*ct
+                                                            })
+                                                    except: continue
+                                    break # On prend le premier bookmaker disponible (généralement le plus complet)
             progress_bar.progress((idx_d + 1) / len(date_list))
         
-        # Le ticket peut contenir plusieurs paris sur le même match ou différents matchs
         final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
         
         if final_ticket:
@@ -238,8 +234,8 @@ with tab2:
             st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{total_odd:.2f} | MISE CONSEILLÉE : {mise_totale:.2f}€</div>", unsafe_allow_html=True)
             st.table(final_ticket)
             send_to_discord(final_ticket, total_odd, risk_mode)
-            st.toast("✅ Ticket publié avec succès !")
-        else: st.error("Aucune opportunité trouvée.")
+            st.toast("✅ Ticket généré !")
+        else: st.error("Aucune opportunité trouvée avec ces critères.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
