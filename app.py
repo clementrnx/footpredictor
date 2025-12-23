@@ -7,7 +7,7 @@ import pandas as pd
 import time
 
 # --- CONFIGURATION CLEMENTRNXX PREDICTOR V5.5 ---
-st.set_page_config(page_title="Clementrnxx Predictor V5.5 ", layout="wide")
+st.set_page_config(page_title="Clementrnxx Predictor V5.5", layout="wide")
 
 st.markdown("""
     <style>
@@ -21,7 +21,6 @@ st.markdown("""
     }
     div.stButton > button:hover { background: #FFD700 !important; color: black !important; box-shadow: 0 0 30px rgba(255, 215, 0, 0.6); }
     .verdict-box { border: 2px solid #FFD700; padding: 25px; text-align: center; border-radius: 20px; background: rgba(0,0,0,0.8); margin: 20px 0; }
-    .recommendation-box { border: 1px solid #FFD700; padding: 15px; border-radius: 10px; background: rgba(255, 215, 0, 0.05); margin-top: 10px; }
     .score-card { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 215, 0, 0.4); padding: 15px; border-radius: 12px; text-align: center; }
     .github-link { display: block; text-align: center; color: #FFD700 !important; font-weight: bold; font-size: 1.2rem; text-decoration: none; margin-top: 40px; padding: 20px; border-top: 1px solid rgba(255, 215, 0, 0.2); }
     </style>
@@ -103,7 +102,8 @@ with tab1:
     
     if teams:
         c1, c2 = st.columns(2)
-        th, ta = c1.selectbox("DOMICILE", sorted(teams.keys())), c2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
+        th = c1.selectbox("DOMICILE", sorted(teams.keys()))
+        ta = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
         if st.button("LANCER L'ANALYSE"):
             att_h, def_h = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             att_a, def_a = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
@@ -122,26 +122,30 @@ with tab1:
         st.subheader(" MODULE BET")
         bc1, bc2 = st.columns([2, 1])
         with bc2:
-            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0)
-            risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2)
+            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0, key="bk_1v1")
+            risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2, key="risk_1v1_sel")
         
         with bc1:
             i1, i2, i3, i4 = st.columns(4)
-            c_a = i1.number_input(f"Cote {th}", value=1.0)
-            c_an = i2.number_input(f"{th}/N", value=1.0)
-            c_bn = i3.number_input(f"N/{ta}", value=1.0)
-            c_b = i4.number_input(f"Cote {ta}", value=1.0)
+            c_a = i1.number_input(f"Cote {th}", value=1.0, key="c_h")
+            c_an = i2.number_input(f"{th}/N", value=1.0, key="c_hn")
+            c_n2 = i3.number_input(f"N/{ta}", value=1.0, key="c_n2")
+            c_b = i4.number_input(f"Cote {ta}", value=1.0, key="c_a")
+            
             i5, i6, i7 = st.columns(3)
-            c_ab = i5.number_input(f"{th}/{ta}", value=1.0)
-            c_by = i6.number_input("BTTS OUI", value=1.0)
-            c_bn = i7.number_input("BTTS NON", value=1.0)
+            c_12 = i5.number_input(f"{th}/{ta}", value=1.0, key="c_12")
+            c_by = i6.number_input("BTTS OUI", value=1.0, key="c_by")
+            c_bn_btts = i7.number_input("BTTS NON", value=1.0, key="c_bn_btts")
 
-        # Logique de recommandation
         cfg = RISK_LEVELS[risk_1v1]
         bets = [
-            (f"Victoire {th}", c_a, r['p_h']), (f"Double Chance {th}/N", c_an, r['p_1n']),
-            (f"Double Chance N/{ta}", c_bn, r['p_n2']), (f"Victoire {ta}", c_b, r['p_a']),
-            (f"Issue {th}/{ta}", c_ab, r['p_12']), ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn, r['p_nobtts'])
+            (f"Victoire {th}", c_a, r['p_h']), 
+            (f"Double Chance {th}/N", c_an, r['p_1n']),
+            (f"Double Chance N/{ta}", c_n2, r['p_n2']), 
+            (f"Victoire {ta}", c_b, r['p_a']),
+            (f"Issue {th}/{ta}", c_12, r['p_12']), 
+            ("BTTS OUI", c_by, r['p_btts']), 
+            ("BTTS NON", c_bn_btts, r['p_nobtts'])
         ]
         
         valid_bets = [b for b in bets if b[1] > 1.0 and b[2] >= cfg['p'] and (b[1] * b[2]) >= cfg['ev']]
@@ -163,7 +167,7 @@ with tab2:
     gc1, gc2, gc3, gc4 = st.columns(4)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
     d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
-    bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan")
+    bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
     scope_scan = gc4.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
     
     selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
@@ -192,9 +196,9 @@ with tab2:
 
                 for lbl, p, m_n, m_v in tests:
                     if p >= risk_cfg['p']:
-                        odds = get_api("odds", {"fixture": f['fixture']['id']})
-                        if odds and odds[0]['bookmakers']:
-                            for btt in odds[0]['bookmakers'][0]['bets']:
+                        odds_data = get_api("odds", {"fixture": f['fixture']['id']})
+                        if odds_data and odds_data[0]['bookmakers']:
+                            for btt in odds_data[0]['bookmakers'][0]['bets']:
                                 if btt['name'] == m_n:
                                     for o in btt['values']:
                                         if o['value'] == m_v:
@@ -216,7 +220,7 @@ with tab2:
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
-    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()))
+    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="sel_tab3")
     standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
     if standings:
         df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form'], "Buts+": t['all']['goals']['for']} for t in standings[0]['league']['standings'][0]])
