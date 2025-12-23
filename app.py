@@ -113,7 +113,143 @@ def get_api(endpoint, params):
     try:
         r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=12)
         return r.json().get('response', [])
-    except: return []
+    except: 
+        return []
+
+@st.cache_data(ttl=3600)
+def get_league_average(league_id, season):
+    """Calcule la moyenne réelle de buts de la ligue depuis l'API"""
+    standings = get_api("standings", {"league": league_id, "season": season})
+    if not standings or not standings[0].get('league', {}).get('standings'):
+        return 2.7  # Fallback moyenne Europe
+    
+    total_goals = 0
+    total_matches = 0
+    
+    for standing in standings[0]['league']['standings'][0]:
+        goals_for = standing['all']['goals']['for']
+        goals_against = standing['all']['goals']['against']
+        played = standing['all']['played']
+        
+        total_goals += goals_for + goals_against
+        total_matches += played
+    
+    avg = total_goals / total_matches if total_matches > 0 else 2.7
+    return avg
+
+@st.cache_data(ttl=3600)
+def get_home_away_strength(team_id, league_id, season):
+    """Calcule les facteurs de force domicile/extérieur réels de l'équipe"""
+    stats = get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id})
+    if not stats:
+        return 1.0, 1.0
+    
+    # Buts marqués
+    goals_home = float(stats.get('goals',{}).get('for',{}).get('average',{}).get('home') or 0)
+    goals_away = float(stats.get('goals',{}).get('for',{}).get('average',{}).get('away') or 0)
+    goals_total = float(stats.get('goals',{}).get('for',{}).get('average',{}).get('total') or 1)
+    
+    # Facteurs relatifs (par rapport à la moyenne de l'équipe)
+    home_attack_factor = (goals_home / goals_total) if goals_total > 0 else 1.0
+    away_attack_factor = (goals_away / goals_total) if goals_total > 0 else 1.0
+    
+    # Buts encaissés
+    conceded_home = float(stats.get('goals',{}).get('against',{}).get('average',{}).get('home') or 0)
+    conceded_away = float(stats.get('goals',{}).get('against',{}).get('average',{}).get('away') or 0)
+    conceded_total = float(stats.get('goals',{}).get('against',{}).get('average',{}).get('total') or 1)
+    
+    home_defense_factor = (conceded_home / conceded_total) if conceded_total > 0 else 1.0
+    away_defense_factor = (conceded_away / conceded_total) if conceded_total > 0 else 1.0
+    
+    return home_attack_factor, away_attack_factor, home_defense_factor, away_defense_factor
+
+@st.cache_data(ttl=1800)
+def get_form_factor(team_id, league_id, season):
+    """Calcule un facteur de forme basé sur les 5 derniers matchs"""
+    fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 5})
+    if not fixtures:
+        return 1.0
+    
+    points = 0
+    matches_count = 0
+    goal_diff = 0
+    
+    for f in fixtures:
+        if f['fixture']['status']['short'] != 'FT':
+            continue
+        
+        matches_count += 1
+        home_id = f['teams']['home']['id']
+        home_goals = f['goals']['home'] or 0
+        away_goals = f['goals']['away'] or 0
+        
+        if home_id == team_id:
+            goal_diff += (home_goals - away_goals)
+            if home_goals > away_goals: 
+                points += 3
+            elif home_goals == away_goals: 
+                points += 1
+        else:
+            goal_diff += (away_goals - home_goals)
+            if away_goals > home_goals: 
+                points += 3
+            elif away_goals == home_goals: 
+                points += 1
+    
+    if matches_count == 0:
+        return 1.0
+    
+    # Points par match (moyenne attendue = 1.5)
+    points_per_match = points / matches_count
+    form_points = 0.85 + (points_per_match - 1.5) / 7.5  # Normalisation autour de 1.0
+    
+    # Différence de buts (ajustement supplémentaire)
+    goal_diff_factor = 1.0 + (goal_diff / matches_count) / 10
+    
+    # Combiner les deux facteurs
+    final_form = form_points * goal_diff_factor
+    
+    # Limiter entre 0.7 et 1.3 pour éviter les extrêmes
+    return max(0.7, min(1.3, final_form))
+
+@st.cache_data(ttl=1800)
+def get_head_to_head_factor(team_h_id, team_a_id):
+    """Analyse des confrontations directes récentes"""
+    h2h = get_api("fixtures/headtohead", {"h2h": f"{team_h_id}-{team_a_id}", "last": 5})
+    if not h2h:
+        return 1.0, 1.0
+    
+    goals_h_total = 0
+    goals_a_total = 0
+    matches_count = 0
+    
+    for match in h2h:
+        if match['fixture']['status']['short'] != 'FT':
+            continue
+        
+        matches_count += 1
+        home_id = match['teams']['home']['id']
+        home_goals = match['goals']['home'] or 0
+        away_goals = match['goals']['away'] or 0
+        
+        if home_id == team_h_id:
+            goals_h_total += home_goals
+            goals_a_total += away_goals
+        else:
+            goals_h_total += away_goals
+            goals_a_total += home_goals
+    
+    if matches_count == 0:
+        return 1.0, 1.0
+    
+    avg_goals_h = goals_h_total / matches_count
+    avg_goals_a = goals_a_total / matches_count
+    
+    # Facteur léger (max +/- 15%)
+    h2h_factor_h = 0.925 + (avg_goals_h / 6)
+    h2h_factor_a = 0.925 + (avg_goals_a / 6)
+    
+    return max(0.85, min(1.15, h2h_factor_h)), max(0.85, min(1.15, h2h_factor_a))
 
 if 'simulation_done' not in st.session_state:
     st.session_state.simulation_done = False
@@ -121,7 +257,6 @@ if 'simulation_done' not in st.session_state:
 
 st.title("ITROZ PREDICTOR")
 
-# On définit La Liga par défaut
 leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
 l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
 l_id = leagues[l_name]
@@ -132,7 +267,6 @@ teams = {t['team']['name']: t['team']['id'] for t in teams_res}
 if teams:
     sorted_team_names = sorted(teams.keys())
     
-    # --- LOGIQUE DE DÉFAUT BARCA / REAL ---
     idx_barca = 0
     idx_real = 1
     
@@ -146,23 +280,65 @@ if teams:
 
     if st.button("Lancer la prédiction"):
         id_h, id_a = teams[t_h], teams[t_a]
-        s_h = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_h})
-        s_a = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_a})
         
-        if s_h and s_a:
-            att_h = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('total', 1.3))
-            def_a = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('total', 1.3))
-            att_a = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('total', 1.3))
-            def_h = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('total', 1.3))
+        with st.spinner("🔍 Analyse approfondie en cours..."):
+            # 1. MOYENNE DYNAMIQUE DE LA LIGUE
+            league_avg = get_league_average(l_id, SEASON)
             
-            lh, la = (att_h * def_a / 1.3) * 1.12, (att_a * def_h / 1.3)
-            matrix = np.zeros((7, 7))
-            for x in range(7):
-                for y in range(7): matrix[x,y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
-            matrix /= matrix.sum()
+            # 2. STATISTIQUES DE BASE
+            s_h = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_h})
+            s_a = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_a})
             
-            st.session_state.data = {'p_h': np.sum(np.tril(matrix, -1)), 'p_n': np.sum(np.diag(matrix)), 'p_a': np.sum(np.triu(matrix, 1)), 'matrix': matrix, 't_h': t_h, 't_a': t_a}
-            st.session_state.simulation_done = True
+            if s_h and s_a:
+                # 3. FACTEURS DOMICILE/EXTÉRIEUR
+                h_att_factor, h_away_att, h_def_factor, h_away_def = get_home_away_strength(id_h, l_id, SEASON)
+                a_att_factor, a_away_att, a_def_factor, a_away_def = get_home_away_strength(id_a, l_id, SEASON)
+                
+                # 4. FORME RÉCENTE
+                form_h = get_form_factor(id_h, l_id, SEASON)
+                form_a = get_form_factor(id_a, l_id, SEASON)
+                
+                # 5. CONFRONTATIONS DIRECTES
+                h2h_h, h2h_a = get_head_to_head_factor(id_h, id_a)
+                
+                # 6. STATS BRUTES
+                att_h_raw = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('total') or league_avg)
+                def_a_raw = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('total') or league_avg)
+                att_a_raw = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('total') or league_avg)
+                def_h_raw = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('total') or league_avg)
+                
+                # 7. CALCUL LAMBDA OPTIMISÉ
+                # Lambda domicile = (attaque domicile * défense adverse / moyenne ligue) * facteurs
+                lh = (att_h_raw * def_a_raw / league_avg) * h_att_factor * form_h * h2h_h
+                
+                # Lambda extérieur = (attaque extérieur * défense domicile / moyenne ligue) * facteurs
+                la = (att_a_raw * def_h_raw / league_avg) * a_away_att * form_a * h2h_a
+                
+                # 8. MATRICE DYNAMIQUE SELON LES LAMBDAS
+                max_goals = int(max(lh, la) * 2.5) + 3
+                max_goals = min(max_goals, 12)  # Cap à 12 pour performances
+                matrix = np.zeros((max_goals, max_goals))
+                
+                for x in range(max_goals):
+                    for y in range(max_goals): 
+                        matrix[x,y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
+                
+                matrix /= matrix.sum()
+                
+                st.session_state.data = {
+                    'p_h': np.sum(np.tril(matrix, -1)), 
+                    'p_n': np.sum(np.diag(matrix)), 
+                    'p_a': np.sum(np.triu(matrix, 1)), 
+                    'matrix': matrix, 
+                    't_h': t_h, 
+                    't_a': t_a,
+                    'lh': lh,
+                    'la': la,
+                    'league_avg': league_avg,
+                    'form_h': form_h,
+                    'form_a': form_a
+                }
+                st.session_state.simulation_done = True
 
 if st.session_state.simulation_done:
     d = st.session_state.data
@@ -228,6 +404,16 @@ if st.session_state.simulation_done:
     sc1, sc2, sc3 = st.columns(3)
     for i in range(3):
         with [sc1, sc2, sc3][i]: st.write(f"**{idx[0][i]} - {idx[1][i]}** ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+    
+    # Infos techniques en expander
+    with st.expander("📊 DÉTAILS TECHNIQUES"):
+        st.write(f"""
+        **Paramètres de calcul :**
+        - Moyenne ligue : **{d['league_avg']:.2f}** buts/match
+        - Lambda {d['t_h']} : **{d['lh']:.2f}** (forme: {d['form_h']:.2f})
+        - Lambda {d['t_a']} : **{d['la']:.2f}** (forme: {d['form_a']:.2f})
+        - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}** scores
+        """)
 
 st.markdown("""
     <div class='footer'>
