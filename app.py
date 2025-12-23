@@ -7,7 +7,7 @@ import pandas as pd
 import time
 
 # --- CONFIGURATION CLEMENTRNXX PREDICTOR V5.5 ---
-st.set_page_config(page_title="Clementrnxx Predictor V5.5", layout="wide")
+st.set_page_config(page_title="Clementrnxx Predictor V9.5", layout="wide")
 
 st.markdown("""
     <style>
