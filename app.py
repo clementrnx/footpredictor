@@ -5,7 +5,7 @@ from scipy.stats import poisson
 from datetime import datetime
 
 # --- CONFIGURATION ET STYLE ---
-st.set_page_config(page_title="iTrOz Predictor V4.5", layout="wide")
+st.set_page_config(page_title="iTrOz Predictor V4.8 - No-Match Edition", layout="wide")
 
 st.markdown("""
     <style>
@@ -14,14 +14,21 @@ st.markdown("""
         background-size: cover;
         background-attachment: fixed;
     }
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.93); }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.94); }
     h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
     
     .verdict-box {
         border: 2px solid #FFD700; padding: 20px; text-align: center;
         border-radius: 15px; background: rgba(255, 215, 0, 0.05); margin: 15px 0;
     }
-    .stMetric { background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 10px; border: 1px solid rgba(255, 215, 0, 0.2); }
+    .bet-card {
+        background: rgba(255, 255, 255, 0.03); padding: 20px; border-radius: 12px;
+        border: 1px solid rgba(255, 215, 0, 0.15); margin-bottom: 20px;
+    }
+    div.stButton > button {
+        background: rgba(255, 215, 0, 0.1) !important; border: 1px solid #FFD700 !important;
+        color: #FFD700 !important; font-weight: bold; width: 100%;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -31,11 +38,11 @@ BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 
-# Configuration du Scanner pour favoriser les "No-Match"
+# Configuration No-Match optimisée (Cotes dès 1.12)
 ALGO_MODES = {
-    "NO-MATCH (ULTRA SAFE)": {"min_p": 0.70, "max_cote": 1.60, "min_ev": 1.05, "kelly": 0.15, "max_legs": 3},
-    "CONFIANCE (MID)": {"min_p": 0.55, "max_cote": 2.20, "min_ev": 1.08, "kelly": 0.30, "max_legs": 4},
-    "VALUE (AGRESSIF)": {"min_p": 0.40, "max_cote": 3.50, "min_ev": 1.12, "kelly": 0.50, "max_legs": 6}
+    "ULTRA SAFE (NO-MATCH)": {"min_p": 0.75, "min_cote": 1.12, "max_cote": 1.45, "min_ev": 1.02, "max_legs": 3},
+    "SEREIN (MID)": {"min_p": 0.60, "min_cote": 1.30, "max_cote": 1.90, "min_ev": 1.05, "max_legs": 4},
+    "VALUE (CHASSEUR)": {"min_p": 0.45, "min_cote": 1.60, "max_cote": 3.00, "min_ev": 1.10, "max_legs": 5}
 }
 
 LEAGUES_DICT = {
@@ -44,7 +51,7 @@ LEAGUES_DICT = {
     "🇫🇷 Ligue 1": 61, "🇮🇹 Serie A": 135, "🇩🇪 Bundesliga": 78
 }
 
-# --- MOTEUR DE CALCUL ---
+# --- MOTEUR ---
 @st.cache_data(ttl=3600)
 def get_api(endpoint, params):
     try:
@@ -62,117 +69,103 @@ def calculate_probs(lh, la):
     return {"p_h": np.sum(np.tril(matrix, -1)), "p_n": np.sum(np.diag(matrix)), "p_a": np.sum(np.triu(matrix, 1)), "matrix": matrix}
 
 def get_lambda(team_id, league_id):
-    f = get_api("fixtures", {"team": team_id, "season": SEASON, "last": 8})
+    f = get_api("fixtures", {"team": team_id, "season": SEASON, "last": 10})
     if not f: return 1.3
     goals = [(m['goals']['home'] if m['teams']['home']['id'] == team_id else m['goals']['away']) or 0 for m in f]
-    weights = [0.85**i for i in range(len(goals))]
-    return sum(g * w for g, w in zip(reversed(goals), weights)) / sum(weights)
+    w = [0.9**i for i in range(len(goals))]
+    return sum(g * weight for g, weight in zip(reversed(goals), w)) / sum(w)
 
-# --- UI PRINCIPALE ---
-st.title("🏆 iTrOz Predictor V4.5")
+# --- INTERFACE ---
+st.title("🏆 iTrOz Predictor V4.8")
 tab1, tab2 = st.tabs(["🎯 ANALYSE 1VS1 (BET & AUDIT)", "🚀 TEAM SCANNER (NO-MATCH)"])
 
-# --- MODE 1V1 : BET & AUDIT ---
 with tab1:
-    l_choice = st.selectbox("LIGUE", [k for k in LEAGUES_DICT.keys() if k != "🌍 TOUS LES CHAMPIONNATS"])
-    teams_data = get_api("teams", {"league": LEAGUES_DICT[l_choice], "season": SEASON})
-    teams = {t['team']['name']: t['team']['id'] for t in teams_data}
+    l_name = st.selectbox("LIGUE", [k for k in LEAGUES_DICT.keys() if k != "🌍 TOUS LES CHAMPIONNATS"])
+    teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
+    teams = {t['team']['name']: t['team']['id'] for t in teams_res}
     
     if teams:
-        colA, colB = st.columns(2)
-        t_h = colA.selectbox("DOMICILE", sorted(teams.keys()))
-        t_a = colB.selectbox("EXTÉRIEUR", sorted(teams.keys()))
+        c1, c2 = st.columns(2)
+        t_h, t_a = c1.selectbox("DOMICILE", sorted(teams.keys())), c2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
         
-        if st.button("LANCER L'ANALYSE DÉTAILLÉE"):
-            lh, la = get_lambda(teams[t_h], LEAGUES_DICT[l_choice]), get_lambda(teams[t_a], LEAGUES_DICT[l_choice])
-            res = calculate_probs(lh, la)
-            st.session_state.data = {"res": res, "t_h": t_h, "t_a": t_a}
+        if st.button("LANCER L'ANALYSE"):
+            lh, la = get_lambda(teams[t_h], LEAGUES_DICT[l_name]), get_lambda(teams[t_a], LEAGUES_DICT[l_name])
+            st.session_state.r1v1 = {"res": calculate_probs(lh, la), "th": t_h, "ta": t_a}
 
-    if 'data' in st.session_state:
-        d = st.session_state.data
-        r, th, ta = d["res"], d["t_h"], d["t_a"]
+    if 'r1v1' in st.session_state:
+        d = st.session_state.r1v1
+        res, th, ta = d["res"], d["th"], d["ta"]
         
-        # Affichage Probabilités
-        c1, c2, c3 = st.columns(3)
-        c1.metric(th, f"{r['p_h']*100:.1f}%")
-        c2.metric("NUL", f"{r['p_n']*100:.1f}%")
-        c3.metric(ta, f"{r['p_a']*100:.1f}%")
+        col1, col2, col3 = st.columns(3)
+        col1.metric(th, f"{res['p_h']*100:.1f}%")
+        col2.metric("NUL", f"{res['p_n']*100:.1f}%")
+        col3.metric(ta, f"{res['p_a']*100:.1f}%")
 
-        # --- BLOC MODE BET ---
-        st.subheader("💰 MODE BET")
+        # MODE BET & AUDIT
+        st.subheader("💰 GESTION BET & AUDIT")
         with st.container():
-            b1, b2, b3, b4 = st.columns(4)
-            capital = b1.number_input("Capital (€)", value=100.0)
-            c_h = b2.number_input(f"Cote {th}", value=2.0)
-            c_n = b3.number_input("Cote Nul", value=3.2)
-            c_a = b4.number_input(f"Cote {ta}", value=3.5)
+            st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
+            a1, a2, a3 = st.columns([2,1,1])
+            pari_user = a1.selectbox("VOTRE SÉLECTION", [th, "Nul", ta, f"{th} ou Nul", f"Nul ou {ta}"])
+            cote_user = a2.number_input("COTE DU BOOK", value=1.20)
+            capital = a3.number_input("CAPITAL (€)", value=100.0)
             
-            opts = [{"n": th, "p": r['p_h'], "c": c_h}, {"n": "Nul", "p": r['p_n'], "c": c_n}, {"n": ta, "p": r['p_a'], "c": c_a}]
-            best = max(opts, key=lambda x: x['p'] * x['c'])
-            if (best['p'] * best['c']) > 1.05:
-                st.info(f"💡 Meilleure Value détectée : **{best['n']}**")
+            p_user = res['p_h'] if pari_user == th else (res['p_n'] if pari_user == "Nul" else res['p_a'])
+            if "ou" in pari_user: p_user = (res['p_h']+res['p_n']) if th in pari_user else (res['p_a']+res['p_n'])
+            
+            ev = p_user * cote_user
+            verdict = "🔥 NO-MATCH" if ev > 1.10 and p_user > 0.70 else ("✅ VALABLE" if ev > 1.02 else "❌ DANGEREUX")
+            
+            # Kelly sécurisé (20% du critère pour préserver la bankroll)
+            b = cote_user - 1
+            k = max(0, ((b * p_user) - (1 - p_user)) / b) if b > 0 else 0
+            
+            st.markdown(f"<div class='verdict-box'><b>AUDIT : {verdict}</b><br>EV Indice : {ev:.2f} | Mise conseillée : {(capital*k*0.2):.2f}€</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- BLOC AUDIT ---
-        st.subheader("🕵️ MODE AUDIT")
-        with st.expander("VÉRIFIER VOTRE PROPRE PARI", expanded=True):
-            a1, a2 = st.columns(2)
-            pari_user = a1.selectbox("Votre sélection", [th, "Nul", ta, f"{th} ou Nul", f"Nul ou {ta}"])
-            cote_user = a2.number_input("Cote du bookmaker", value=1.50, key="audit_cote")
-            
-            # Calcul proba combinée pour l'audit
-            p_user = r['p_h'] if pari_user == th else (r['p_n'] if pari_user == "Nul" else r['p_a'])
-            if "ou" in pari_user:
-                p_user = (r['p_h'] + r['p_n']) if th in pari_user else (r['p_a'] + r['p_n'])
-            
-            ev_user = p_user * cote_user
-            confiance = "🔥 EXCELLENT" if ev_user > 1.15 else ("✅ VALABLE" if ev_user > 1.0 else "❌ DANGEREUX")
-            st.markdown(f"<div class='verdict-box'>VERDICT AUDIT : {confiance} (Indice EV : {ev_user:.2f})</div>", unsafe_allow_html=True)
-
-# --- MODE TEAM : SCANNER NO-MATCH ---
 with tab2:
-    st.subheader("🚀 SCANNER DE MATCHS À HAUTE PROBABILITÉ")
+    st.subheader("🚀 SCANNER DE NO-MATCH (DÈS @1.12)")
     s1, s2, s3 = st.columns(3)
-    l_scan = s1.selectbox("LIGUE À SCANNER", list(LEAGUES_DICT.keys()), key="scan_l")
-    d_scan = s2.date_input("DATE", datetime.now(), key="scan_d")
-    m_scan = s3.select_slider("MODE ALGO", options=list(ALGO_MODES.keys()), value="NO-MATCH (ULTRA SAFE)")
+    l_scan = s1.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="s_l")
+    d_scan = s2.date_input("DATE", datetime.now(), key="s_d")
+    m_scan = s3.select_slider("MODE", options=list(ALGO_MODES.keys()), value="ULTRA SAFE (NO-MATCH)")
     
-    if st.button("LANCER LE SCAN DES NO-MATCH"):
+    if st.button("LANCER LE SCAN"):
         cfg = ALGO_MODES[m_scan]
         lids = [LEAGUES_DICT[l_scan]] if LEAGUES_DICT[l_scan] != "ALL" else [140, 39, 2, 61, 135, 78]
-        opps = []
+        results = []
         
-        with st.spinner("Recherche des No-Match en cours..."):
+        with st.spinner("Recherche des favoris solides..."):
             for lid in lids:
                 fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": d_scan.strftime('%Y-%m-%d')})
                 for f in fixtures:
                     lh, la = get_lambda(f['teams']['home']['id'], lid), get_lambda(f['teams']['away']['id'], lid)
                     pr = calculate_probs(lh, la)
                     
-                    # On ne regarde que les probabilités fortes (> min_p)
-                    outcomes = [
-                        {"match": f"{f['teams']['home']['name']} Win", "p": pr['p_h'], "val": "Home"},
-                        {"match": f"{f['teams']['away']['name']} Win", "p": pr['p_a'], "val": "Away"}
-                    ]
-                    
-                    for o in outcomes:
-                        if o['p'] >= cfg['min_p']: # Le filtre No-Match est ici
+                    # Test Domicile et Extérieur
+                    for side, p_win, val in [("Home", pr['p_h'], "Home"), ("Away", pr['p_a'], "Away")]:
+                        if p_win >= cfg['min_p']:
                             odds = get_api("odds", {"fixture": f['fixture']['id']})
                             if odds:
-                                for b in odds[0]['bookmakers'][0]['bets']:
-                                    if b['name'] == "Match Winner":
-                                        for v in b['values']:
-                                            if v['value'] == o['val']:
-                                                cote = float(v['odd'])
-                                                if cote <= cfg['max_cote']: # Anti-cote folle
-                                                    opps.append({"Match": f['teams']['home']['name'] + " vs " + f['teams']['away']['name'], "Pari": o['match'], "Proba IA": f"{o['p']*100:.1f}%", "Cote": cote, "EV": o['p']*cote})
+                                for bet in odds[0]['bookmakers'][0]['bets']:
+                                    if bet['name'] == "Match Winner":
+                                        for v in bet['values']:
+                                            cote = float(v['odd'])
+                                            if v['value'] == val and cfg['min_cote'] <= cote <= cfg['max_cote']:
+                                                results.append({
+                                                    "Match": f"{f['teams']['home']['name']} vs {f['teams']['away']['name']}",
+                                                    "Pari": f"{v['value']} Win",
+                                                    "Confiance": f"{p_win*100:.1f}%",
+                                                    "Cote": cote,
+                                                    "EV": p_win * cote
+                                                })
 
-            valid = sorted(opps, key=lambda x: x['EV'], reverse=True)[:cfg['max_legs']]
-            if valid:
-                cote_total = np.prod([x['Cote'] for x in valid])
-                st.success(f"Ticket généré avec {len(valid)} No-Match")
-                st.table(valid)
-                st.metric("COTE TOTALE DU COMBINÉ", f"@{cote_total:.2f}")
+            final = sorted(results, key=lambda x: x['EV'], reverse=True)[:cfg['max_legs']]
+            if final:
+                st.success(f"{len(final)} No-Match trouvés !")
+                st.table(final)
+                st.metric("COTE TOTAL COMBINÉE", f"@{np.prod([x['Cote'] for x in final]):.2f}")
             else:
-                st.warning("Aucun No-Match détecté pour cette date. L'IA refuse de prendre des risques inutiles.")
+                st.warning("Aucun No-Match répondant aux critères de sécurité aujourd'hui.")
 
-st.markdown("<div style='text-align:center; opacity:0.3; margin-top:50px;'>iTrOz Predictor v4.5 - Intelligence Artificielle et Gestion de Risque</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; opacity:0.2; margin-top:50px;'>iTrOz Predictor v4.8 - Spécialiste No-Match</div>", unsafe_allow_html=True)
