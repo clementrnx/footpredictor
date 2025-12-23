@@ -287,6 +287,14 @@ if teams:
             stats_h = get_comprehensive_stats(id_h, l_id, SEASON, use_global=use_global_stats)
             stats_a = get_comprehensive_stats(id_a, l_id, SEASON, use_global=use_global_stats)
             
+            # Stocker pour debug
+            if use_global_stats:
+                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "season": SEASON, "last": 5})
+                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "season": SEASON, "last": 5})
+            else:
+                st.session_state.debug_fixtures_h = get_api("fixtures", {"team": id_h, "league": l_id, "season": SEASON, "last": 5})
+                st.session_state.debug_fixtures_a = get_api("fixtures", {"team": id_a, "league": l_id, "season": SEASON, "last": 5})
+            
             if stats_h and stats_a:
                 s_h = stats_h['base']
                 s_a = stats_a['base']
