@@ -89,21 +89,24 @@ st.subheader("MODÈLE D'ARBITRAGE MATHÉMATIQUE - NO-MATCH PRIORITY")
 tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
 
 with tab1:
-    l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()), key="sb_league_1v1")
-    scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="slider_scope_1v1")
+    l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()), key="1v1_league_sel")
+    scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="1v1_scope_slider")
     teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
     teams = {t['team']['name']: t['team']['id'] for t in teams_res}
     
     if teams:
         c1, c2 = st.columns(2)
-        th = c1.selectbox("DOMICILE", sorted(teams.keys()), key="sb_home_team")
-        ta = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="sb_away_team")
+        th = c1.selectbox("DOMICILE", sorted(teams.keys()), key="1v1_home_sel")
+        ta = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="1v1_away_sel")
         
-        if st.button("LANCER L'ANALYSE", key="btn_analyze_1v1"):
-            att_h, def_h = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
-            att_a, def_a = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
-            lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
-            st.session_state.v5_final = {"res": calculate_perfect_probs(lh, la), "th": th, "ta": ta}
+        if st.button("LANCER L'ANALYSE", key="1v1_analyze_btn"):
+            if th == ta:
+                st.error("Sélectionnez deux équipes différentes.")
+            else:
+                att_h, def_h = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+                att_a, def_a = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+                lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
+                st.session_state.v5_final = {"res": calculate_perfect_probs(lh, la), "th": th, "ta": ta}
 
     if 'v5_final' in st.session_state:
         r, th, ta = st.session_state.v5_final["res"], st.session_state.v5_final["th"], st.session_state.v5_final["ta"]
@@ -117,19 +120,19 @@ with tab1:
         st.subheader(" MODULE BET OPTIMISÉ")
         bc1, bc2 = st.columns([2, 1])
         with bc2:
-            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, key="ni_bankroll_1v1")
-            risk_1v1 = st.selectbox("STRATÉGIE DE MISE", list(RISK_LEVELS.keys()), index=0, key="sb_risk_1v1")
+            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, key="1v1_bank_input")
+            risk_1v1 = st.selectbox("STRATÉGIE DE MISE", list(RISK_LEVELS.keys()), index=0, key="1v1_risk_strat")
         
         with bc1:
             i1, i2, i3, i4 = st.columns(4)
-            c_a = i1.number_input(f"Cote {th}", value=1.0, key=f"c_{th}")
-            c_an = i2.number_input(f"{th}/N", value=1.0, key=f"c_{th}_n")
-            c_bn = i3.number_input(f"N/{ta}", value=1.0, key=f"c_n_{ta}")
-            c_b = i4.number_input(f"Cote {ta}", value=1.0, key=f"c_{ta}")
+            c_a = i1.number_input(f"Cote {th}", value=1.0, key="odd_h_win")
+            c_an = i2.number_input(f"{th}/N", value=1.0, key="odd_h_draw")
+            c_bn = i3.number_input(f"N/{ta}", value=1.0, key="odd_a_draw")
+            c_b = i4.number_input(f"Cote {ta}", value=1.0, key="odd_a_win")
             i5, i6, i7 = st.columns(3)
-            c_ab = i5.number_input(f"{th}/{ta}", value=1.0, key=f"c_{th}_{ta}")
-            c_by = i6.number_input("BTTS OUI", value=1.0, key="c_btts_yes")
-            c_bn_val = i7.number_input("BTTS NON", value=1.0, key="c_btts_no")
+            c_ab = i5.number_input(f"{th}/{ta}", value=1.0, key="odd_12_dc")
+            c_by = i6.number_input("BTTS OUI", value=1.0, key="odd_btts_y")
+            c_bn_val = i7.number_input("BTTS NON", value=1.0, key="odd_btts_n")
 
         cfg = RISK_LEVELS[risk_1v1]
         bets = [
@@ -149,23 +152,18 @@ with tab1:
         else:
             st.warning("⚠️ AUCUN 'NO-MATCH' DÉTECTÉ.")
 
-        st.subheader("TOP SCORES")
-        idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
-        sc = st.columns(5)
-        for i in range(5): sc[i].markdown(f"<div class='score-card'><b>{idx[0][i]} - {idx[1][i]}</b><br>{r['matrix'][idx[0][i],idx[1][i]]*100:.1f}%</div>", unsafe_allow_html=True)
-
 with tab2:
     st.subheader(" SCANNER DE TICKETS À VARIANCE FAIBLE")
     gc1, gc2, gc3, gc4 = st.columns(4)
-    l_scan = gc1.selectbox("LIGUES", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="sb_league_scan")
-    d_scan = gc2.date_input("DATE", datetime.now(), key="di_date_scan")
-    bank_scan = gc3.number_input("FONDS (€)", value=100.0, key="ni_bankroll_scan")
-    scope_scan = gc4.select_slider("DATA", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="slider_scope_scan")
+    l_scan = gc1.selectbox("LIGUES", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="scan_league_sel")
+    d_scan = gc2.date_input("DATE", datetime.now(), key="scan_date_sel")
+    bank_scan = gc3.number_input("FONDS (€)", value=100.0, key="scan_bank_input")
+    scope_scan = gc4.select_slider("DATA", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="scan_scope_slider")
     
-    risk_mode = st.select_slider("PROFIL DE RISQUE", options=list(RISK_LEVELS.keys()), value="SAFE", key="slider_risk_scan")
+    risk_mode = st.select_slider("PROFIL DE RISQUE", options=list(RISK_LEVELS.keys()), value="SAFE", key="scan_risk_slider")
     risk_cfg = RISK_LEVELS[risk_mode]
     
-    if st.button("GÉNÉRER LE TICKET", key="btn_generate_scan"):
+    if st.button("GÉNÉRER LE TICKET", key="scan_generate_btn"):
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
@@ -223,7 +221,7 @@ with tab2:
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
-    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="sb_league_stats")
+    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()), key="stats_league_sel")
     standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
     if standings:
         df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form'], "Buts+": t['all']['goals']['for']} for t in standings[0]['league']['standings'][0]])
