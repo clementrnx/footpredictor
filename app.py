@@ -25,15 +25,28 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIG API ---
+# --- CONFIG API & DISCORD ---
 API_KEY = st.secrets["MY_API_KEY"]
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1453026279275106355/gbYAwBRntm1FCoqoBTz5lj1SCe2ijyeHHYoe4CFYwpzOw2DO-ozcCsgkK_53HhB-kFGE"
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 
 LEAGUES_DICT = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135, "Bundesliga": 78}
 
-# --- MOTEUR MATHÉMATIQUE ---
+# --- FONCTIONS ---
+def send_to_discord(ticket, total_odd, mode):
+    matches_text = "\n".join([f"🔹 {t['MATCH']} : **{t['PARI']}** (@{t['COTE']}) - {t['PROBA']}" for t in ticket])
+    payload = {
+        "embeds": [{
+            "title": f"🚀 NOUVEAU TICKET GÉNÉRÉ - MODE {mode}",
+            "description": f"{matches_text}\n\n🔥 **COTE TOTALE : @{total_odd:.2f}**",
+            "color": 16766720,
+            "footer": {"text": "Clementrnxx Predictor V5.5 - Final Edition"}
+        }]
+    }
+    requests.post(DISCORD_WEBHOOK, json=payload)
+
 def calculate_perfect_probs(lh, la):
     rho = -0.11
     matrix = np.zeros((10, 10))
@@ -49,11 +62,7 @@ def calculate_perfect_probs(lh, la):
     matrix /= matrix.sum()
     p_h, p_n, p_a = np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
     p_btts = np.sum(matrix[1:, 1:])
-    return {
-        "p_h": p_h, "p_n": p_n, "p_a": p_a, 
-        "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, 
-        "p_btts": p_btts, "p_nobtts": 1.0 - p_btts, "matrix": matrix
-    }
+    return {"p_h": p_h, "p_n": p_n, "p_a": p_a, "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, "p_btts": p_btts, "p_nobtts": 1.0 - p_btts, "matrix": matrix}
 
 def get_optimized_lambda(team_id, league_id, scope_overall):
     params = {"team": team_id, "season": SEASON, "last": 15}
@@ -71,7 +80,7 @@ def get_api(endpoint, params):
         return r.json().get('response', [])
     except: return []
 
-# --- INTERFACE ---
+# --- UI ---
 st.title("🏆 CLEMENTRNXX PREDICTOR V5.5")
 st.subheader("FINAL EDITION")
 
@@ -80,7 +89,6 @@ tab1, tab2, tab3 = st.tabs(["🎯 ANALYSE 1VS1", "🚀 SCANNER DE TICKETS", "�
 with tab1:
     l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()))
     scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
-    
     teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
     teams = {t['team']['name']: t['team']['id'] for t in teams_res}
     
@@ -101,31 +109,12 @@ with tab1:
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
-        st.subheader("🕵️ AUDIT DU PARI")
-        ac1, ac2 = st.columns(2)
-        u_bet = ac1.selectbox("VOTRE SÉLECTION", [th, ta, "Match Nul", f"{th} ou Nul", f"Nul ou {ta}", f"{th} ou {ta}", "Les deux équipes marquent", "Une ou aucune équipe marque"])
-        u_odd = ac2.number_input("COTE DU BOOKMAKER", value=1.50, step=0.01)
-        
-        p_map = {th: r['p_h'], ta: r['p_a'], "Match Nul": r['p_n'], f"{th} ou Nul": r['p_1n'], f"Nul ou {ta}": r['p_n2'], f"{th} ou {ta}": r['p_12'], "Les deux équipes marquent": r['p_btts'], "Une ou aucune équipe marque": r['p_nobtts']}
-        ev = p_map[u_bet] * u_odd
-        st.markdown(f"<div class='verdict-box'>EXPECTED VALUE : {ev:.4f}<br>STATUT : {'✅ VALIDE' if ev > 1.05 else '❌ EV NÉGATIVE'}</div>", unsafe_allow_html=True)
-
-        st.subheader("💰 MODULE BET (COMPARATIF)")
+        st.subheader("💰 MODULE BET")
         b1, b2, b3 = st.columns(3)
         c_1 = b1.number_input(f"Cote {th}", value=1.0)
         c_n = b2.number_input("Cote Nul", value=1.0)
         c_2 = b3.number_input(f"Cote {ta}", value=1.0)
-        b4, b5, b6, b7, b8 = st.columns(5)
-        c_1n = b4.number_input(f"{th}/N", value=1.0)
-        c_n2 = b5.number_input(f"N/{ta}", value=1.0)
-        c_12 = b6.number_input(f"{th}/{ta}", value=1.0)
-        c_btts = b7.number_input("BTTS OUI", value=1.0)
-        c_nobtts = b8.number_input("BTTS NON", value=1.0)
-
-        cap = st.number_input("BANKROLL (€)", value=100.0)
-        k = max(0, (((u_odd-1) * p_map[u_bet]) - (1 - p_map[u_bet])) / (u_odd-1)) if u_odd > 1 else 0
-        st.success(f"MISE OPTIMISÉE : **{(cap * k * 0.2):.2f} €**")
-
+        
         st.subheader("🔢 TOP SCORES")
         idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
         sc = st.columns(5)
@@ -138,11 +127,11 @@ with tab2:
     d_scan = gc2.date_input("DATE DU SCAN", datetime.now())
     scope_scan = gc3.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
     
-    selected_markets = st.multiselect("MARCHÉS À ANALYSER", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
-    risk_mode = st.select_slider("MODE DE RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
+    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
+    risk_mode = st.select_slider("RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
     risk_cfg = {"SAFE": {"p": 0.82, "ev": 1.02, "legs": 2}, "MID-SAFE": {"p": 0.74, "ev": 1.05, "legs": 3}, "MID": {"p": 0.64, "ev": 1.08, "legs": 4}, "MID-AGGRESSIF": {"p": 0.52, "ev": 1.12, "legs": 5}, "AGGRESSIF": {"p": 0.42, "ev": 1.15, "legs": 7}}[risk_mode]
     
-    if st.button("GÉNÉRER TICKET"):
+    if st.button("GÉNÉRER ET ENVOYER SUR DISCORD"):
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
@@ -175,9 +164,12 @@ with tab2:
         
         final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
         if final_ticket:
-            st.markdown(f"<div class='verdict-box'>TICKET GÉNÉRÉ | COTE : @{np.prod([x['COTE'] for x in final_ticket]):.2f}</div>", unsafe_allow_html=True)
+            total_odd = np.prod([x['COTE'] for x in final_ticket])
+            st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{total_odd:.2f}</div>", unsafe_allow_html=True)
             st.table(final_ticket)
-        else: st.error("Aucune opportunité détectée pour cette configuration.")
+            send_to_discord(final_ticket, total_odd, risk_mode)
+            st.toast("✅ Ticket envoyé sur Discord !")
+        else: st.error("Aucune opportunité trouvée.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
