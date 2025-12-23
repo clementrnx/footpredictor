@@ -47,7 +47,12 @@ def calculate_perfect_probs(lh, la):
             matrix[x, y] = max(0, prob * adj)
     matrix /= matrix.sum()
     p_h, p_n, p_a = np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
-    return {"p_h": p_h, "p_n": p_n, "p_a": p_a, "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, "p_btts": np.sum(matrix[1:, 1:]), "matrix": matrix}
+    p_btts = np.sum(matrix[1:, 1:])
+    return {
+        "p_h": p_h, "p_n": p_n, "p_a": p_a, 
+        "p_1n": p_h+p_n, "p_n2": p_n+p_a, "p_12": p_h+p_a, 
+        "p_btts": p_btts, "p_nobtts": 1 - p_btts, "matrix": matrix
+    }
 
 def get_optimized_lambda(team_id, league_id, scope_overall):
     params = {"team": team_id, "season": SEASON, "last": 15}
@@ -73,7 +78,7 @@ tab1, tab2, tab3 = st.tabs(["🎯 ANALYSE 1VS1", "🚀 SCANNER DE TICKETS", "�
 
 with tab1:
     l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()))
-    scope_1v1 = st.select_slider("MODE D'ANALYSE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
     
     teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
     teams = {t['team']['name']: t['team']['id'] for t in teams_res}
@@ -88,41 +93,45 @@ with tab1:
 
     if 'v5_final' in st.session_state:
         r, th, ta = st.session_state.v5_final["res"], st.session_state.v5_final["th"], st.session_state.v5_final["ta"]
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric(th, f"{r['p_h']*100:.1f}%")
         m2.metric("MATCH NUL", f"{r['p_n']*100:.1f}%")
         m3.metric(ta, f"{r['p_a']*100:.1f}%")
-        m4.metric("LES DEUX MARQUENT", f"{r['p_btts']*100:.1f}%")
+        m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
+        m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
         # AUDIT
         st.subheader("🕵️ AUDIT DU PARI")
         ac1, ac2 = st.columns(2)
-        u_bet = ac1.selectbox("VOTRE SÉLECTION", [th, ta, "Match Nul", f"{th} ou Nul", f"Nul ou {ta}", f"{th} ou {ta}", "Les deux équipes marquent"])
+        u_bet = ac1.selectbox("VOTRE SÉLECTION", [th, ta, "Match Nul", f"{th} ou Nul", f"Nul ou {ta}", f"{th} ou {ta}", "Les deux équipes marquent", "Une ou aucune équipe marque"])
         u_odd = ac2.number_input("COTE DU BOOKMAKER", value=1.50, step=0.01)
         
-        p_map = {th: r['p_h'], ta: r['p_a'], "Match Nul": r['p_n'], f"{th} ou Nul": r['p_1n'], f"Nul ou {ta}": r['p_n2'], f"{th} ou {ta}": r['p_12'], "Les deux équipes marquent": r['p_btts']}
+        p_map = {
+            th: r['p_h'], ta: r['p_a'], "Match Nul": r['p_n'], 
+            f"{th} ou Nul": r['p_1n'], f"Nul ou {ta}": r['p_n2'], f"{th} ou {ta}": r['p_12'], 
+            "Les deux équipes marquent": r['p_btts'], "Une ou aucune équipe marque": r['p_nobtts']
+        }
         ev = p_map[u_bet] * u_odd
-        st.markdown(f"<div class='verdict-box'>EXPECTED VALUE : {ev:.4f}<br>STATUT : {'✅ MATHÉMATIQUEMENT VALIDE' if ev > 1.05 else '❌ EV NÉGATIVE'}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='verdict-box'>EXPECTED VALUE : {ev:.4f}<br>STATUT : {'✅ VALIDE' if ev > 1.05 else '❌ EV NÉGATIVE'}</div>", unsafe_allow_html=True)
 
         # BET
-        st.subheader("💰 MODULE BET (COMPARATIF DES COTES)")
-        st.write("Entrez vos cotes pour trouver la meilleure Value :")
+        st.subheader("💰 MODULE BET (COMPARATIF)")
         b1, b2, b3 = st.columns(3)
-        c_1 = b1.number_input(f"Cote {th}", value=1.0, step=0.1)
-        c_n = b2.number_input("Cote Nul", value=1.0, step=0.1)
-        c_2 = b3.number_input(f"Cote {ta}", value=1.0, step=0.1)
+        c_1 = b1.number_input(f"Cote {th}", value=1.0)
+        c_n = b2.number_input("Cote Nul", value=1.0)
+        c_2 = b3.number_input(f"Cote {ta}", value=1.0)
         
-        b4, b5, b6, b7 = st.columns(4)
-        c_1n = b4.number_input(f"Cote {th}/N", value=1.0, step=0.1)
-        c_n2 = b5.number_input(f"Cote N/{ta}", value=1.0, step=0.1)
-        c_12 = b6.number_input(f"Cote {th}/{ta}", value=1.0, step=0.1)
-        c_btts = b7.number_input("Cote BTTS", value=1.0, step=0.1)
+        b4, b5, b6, b7, b8 = st.columns(5)
+        c_1n = b4.number_input(f"{th}/N", value=1.0)
+        c_n2 = b5.number_input(f"N/{ta}", value=1.0)
+        c_12 = b6.number_input(f"{th}/{ta}", value=1.0)
+        c_btts = b7.number_input("BTTS OUI", value=1.0)
+        c_nobtts = b8.number_input("BTTS NON", value=1.0)
 
-        # KELLY CALCULATOR
+        # KELLY
         cap = st.number_input("BANKROLL (€)", value=100.0)
-        prob_bet = p_map[u_bet]
-        k = max(0, (((u_odd-1) * prob_bet) - (1 - prob_bet)) / (u_odd-1)) if u_odd > 1 else 0
-        st.success(f"MISE CONSEILLÉE SUR VOTRE CHOIX : **{(cap * k * 0.2):.2f} €**")
+        k = max(0, (((u_odd-1) * p_map[u_bet]) - (1 - p_map[u_bet])) / (u_odd-1)) if u_odd > 1 else 0
+        st.success(f"MISE OPTIMISÉE : **{(cap * k * 0.2):.2f} €**")
 
         st.subheader("🔢 TOP SCORES")
         idx = np.unravel_index(np.argsort(r['matrix'].ravel())[-5:][::-1], r['matrix'].shape)
@@ -132,12 +141,12 @@ with tab1:
 with tab2:
     st.subheader("🚀 GÉNÉRATEUR DE TICKETS")
     gc1, gc2 = st.columns(2)
-    l_scan = gc1.selectbox("CHAMPIONNAT CIBLE", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
-    scope_scan = gc2.select_slider("MODE DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
-    risk_mode = st.select_slider("MODES DE RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
+    l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
+    scope_scan = gc2.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    risk_mode = st.select_slider("MODE DE RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
     risk_cfg = {"SAFE": {"p": 0.82, "ev": 1.02, "legs": 2}, "MID-SAFE": {"p": 0.74, "ev": 1.05, "legs": 3}, "MID": {"p": 0.64, "ev": 1.08, "legs": 4}, "MID-AGGRESSIF": {"p": 0.52, "ev": 1.12, "legs": 5}, "AGGRESSIF": {"p": 0.42, "ev": 1.15, "legs": 7}}[risk_mode]
     
-    if st.button("SCANNER LES OPPORTUNITÉS"):
+    if st.button("GÉNÉRER TICKET"):
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         for lid in lids:
@@ -147,14 +156,14 @@ with tab2:
                 la = get_optimized_lambda(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL") * 0.92
                 pr = calculate_perfect_probs(lh, la)
                 
-                # Nomenclature réelle pour le ticket
                 h_name, a_name = f['teams']['home']['name'], f['teams']['away']['name']
                 tests = [
                     (h_name, pr['p_h'], "Match Winner", "Home"),
                     (a_name, pr['p_a'], "Match Winner", "Away"),
                     (f"{h_name} ou Nul", pr['p_1n'], "Double Chance", "Home/Draw"),
                     (f"Nul ou {a_name}", pr['p_n2'], "Double Chance", "Draw/Away"),
-                    ("Les deux marquent", pr['p_btts'], "Both Teams Score", "Yes")
+                    ("Les deux marquent", pr['p_btts'], "Both Teams Score", "Yes"),
+                    ("Pas de BTTS", pr['p_nobtts'], "Both Teams Score", "No")
                 ]
                 for lbl, p, m_n, m_v in tests:
                     if p >= risk_cfg['p']:
@@ -172,14 +181,13 @@ with tab2:
         if final_ticket:
             st.markdown(f"<div class='verdict-box'>COTE TOTALE : @{np.prod([x['COTE'] for x in final_ticket]):.2f}</div>", unsafe_allow_html=True)
             st.table(final_ticket)
-        else: st.error("Aucune opportunité détectée.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
-    l_sel = st.selectbox("LIGUE POUR ANALYSE", list(LEAGUES_DICT.keys()))
+    l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()))
     standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
     if standings:
-        df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form'], "Buts+": t['all']['goals']['for'], "Buts-": t['all']['goals']['against']} for t in standings[0]['league']['standings'][0]])
+        df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form'], "Buts+": t['all']['goals']['for']} for t in standings[0]['league']['standings'][0]])
         st.dataframe(df, use_container_width=True)
 
 st.markdown("""<a href="https://github.com/clementrnx" class="github-link" target="_blank" style="color:#FFD700;">GITHUB : github.com/clementrnx</a>""", unsafe_allow_html=True)
