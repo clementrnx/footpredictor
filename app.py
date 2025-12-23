@@ -248,10 +248,13 @@ if 'simulation_done' not in st.session_state:
 
 st.title("ITROZ PREDICTOR")
 
-# Toggle Mode en haut
-col_toggle, col_league = st.columns([1, 3])
+# Toggle Mode en haut + Agressivité
+col_toggle, col_aggr, col_league = st.columns([1, 1, 2])
 with col_toggle:
     use_global_stats = st.toggle("📊 MODE GLOBAL", value=False, help="Utilise les stats toutes compétitions au lieu des stats spécifiques à la ligue")
+
+with col_aggr:
+    aggressivity = st.select_slider("🎲 MODE", options=["PRUDENT", "ÉQUILIBRÉ", "JOUEUR", "RISQUÉ"], value="JOUEUR")
 
 leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
 with col_league:
@@ -376,7 +379,8 @@ if teams:
                     'using_xg_a': using_xg_a,
                     'xg_h_matches': stats_h['xg_home']['matches_count'] if stats_h['xg_home'] else 0,
                     'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0,
-                    'mode': "Global" if use_global_stats else l_name
+                    'mode': "Global" if use_global_stats else l_name,
+                    'aggressivity': aggressivity
                 }
                 st.session_state.simulation_done = True
 
@@ -403,6 +407,24 @@ if st.session_state.simulation_done:
     c_na = dc_2.number_input(f"COTE NUL / {d['t_a']}", value=1.30)
     c_ha = dc_3.number_input(f"COTE {d['t_h']} / {d['t_a']}", value=1.30)
 
+    # Seuils ajustés selon l'agressivité
+    thresholds = {
+        "PRUDENT": 1.08,      # Très conservateur
+        "ÉQUILIBRÉ": 1.00,    # Value positive uniquement
+        "JOUEUR": 0.92,       # Accepte value légèrement négative
+        "RISQUÉ": 0.82        # Très agressif
+    }
+    
+    kelly_multipliers = {
+        "PRUDENT": 0.20,      # 20% du Kelly
+        "ÉQUILIBRÉ": 0.40,    # 40% du Kelly
+        "JOUEUR": 0.65,       # 65% du Kelly
+        "RISQUÉ": 0.85        # 85% du Kelly
+    }
+    
+    threshold = thresholds[d['aggressivity']]
+    kelly_mult = kelly_multipliers[d['aggressivity']]
+
     opts = [
         {"n": d['t_h'], "p": d['p_h'], "c": c_h},
         {"n": "NUL", "p": d['p_n'], "c": c_n},
@@ -413,16 +435,43 @@ if st.session_state.simulation_done:
     ]
 
     best_o = max(opts, key=lambda x: x['p'] * x['c'])
-    if best_o['p'] * best_o['c'] > 1.02:
+    ev = best_o['p'] * best_o['c']
+    
+    if ev > threshold:
         b_val = best_o['c'] - 1
         k_val = ((b_val * best_o['p']) - (1 - best_o['p'])) / b_val if b_val > 0 else 0
-        m_finale = bankroll * k_val
-        m_finale = max(bankroll * 0.30, m_finale) 
-        m_finale = min(m_finale, bankroll * 1.00) 
+        k_val = max(k_val, 0.01)  # Minimum 1% du bankroll
         
-        st.markdown(f"<div class='verdict-text'>RECOMMANDATION : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
+        m_finale = bankroll * k_val * kelly_mult
+        m_finale = max(bankroll * 0.05, m_finale)  # Minimum 5% du bankroll
+        m_finale = min(m_finale, bankroll * 0.50)  # Maximum 50% du bankroll
+        
+        # Confiance basée sur l'EV
+        if ev >= 1.15:
+            confidence = "🔥 FORTE"
+        elif ev >= 1.05:
+            confidence = "✅ BONNE"
+        elif ev >= 0.95:
+            confidence = "⚠️ MOYENNE"
+        else:
+            confidence = "⚡ SPÉCULATIVE"
+        
+        st.markdown(f"<div class='verdict-text'>{confidence} | {best_o['n']} | MISE : {m_finale:.2f}€ | EV: {ev:.2f}</div>", unsafe_allow_html=True)
+        
+        # Afficher les alternatives proches
+        alternatives = [o for o in opts if o != best_o and o['p'] * o['c'] > threshold * 0.95]
+        if alternatives:
+            st.write("**💡 ALTERNATIVES INTÉRESSANTES :**")
+            for alt in alternatives[:2]:
+                alt_ev = alt['p'] * alt['c']
+                st.write(f"- {alt['n']} (cote {alt['c']:.2f}) | EV: {alt_ev:.2f}")
     else:
-        st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='verdict-text'>❌ PAS DE VALUE DÉTECTÉ | Meilleur EV: {ev:.2f} (seuil: {threshold:.2f})</div>", unsafe_allow_html=True)
+        
+        # Toujours montrer le meilleur pari même sans value
+        if ev > 0.75:
+            st.write(f"**🎲 PARI LE MOINS MAUVAIS :** {best_o['n']} (mais en dessous du seuil {d['aggressivity']})")
+    
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.subheader("🔍 AUDIT DU TICKET")
@@ -436,7 +485,17 @@ if st.session_state.simulation_done:
     elif "ou" in aud_choix: p_audit = d['p_h'] + d['p_a']
     
     audit_val = p_audit * aud_cote
-    stat = "SAFE" if audit_val >= 1.10 else ("MID" if audit_val >= 0.98 else "DANGEREUX")
+    
+    # Audit adapté au mode
+    if d['aggressivity'] == "PRUDENT":
+        stat = "✅ EXCELLENT" if audit_val >= 1.10 else ("⚠️ ACCEPTABLE" if audit_val >= 1.00 else "❌ À ÉVITER")
+    elif d['aggressivity'] == "ÉQUILIBRÉ":
+        stat = "✅ TRÈS BON" if audit_val >= 1.05 else ("✅ BON" if audit_val >= 0.98 else "⚠️ RISQUÉ")
+    elif d['aggressivity'] == "JOUEUR":
+        stat = "🔥 PARFAIT" if audit_val >= 1.05 else ("✅ JOUABLE" if audit_val >= 0.90 else "⚠️ LIMITE")
+    else:  # RISQUÉ
+        stat = "🔥 GO" if audit_val >= 1.00 else ("⚡ ACCEPTABLE" if audit_val >= 0.80 else "⚠️ TRÈS RISQUÉ")
+    
     st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
 
     st.subheader("SCORES PROBABLES")
@@ -456,40 +515,4 @@ if st.session_state.simulation_done:
                 away = f['teams']['away']['name']
                 score = f"{f['goals']['home']}-{f['goals']['away']}"
                 xg_h = f['teams']['home'].get('xg', 'N/A')
-                xg_a = f['teams']['away'].get('xg', 'N/A')
-                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
-            
-            st.write(f"**{d['t_a']} - 5 derniers matchs :**")
-            for f in st.session_state.debug_fixtures_a[:5]:
-                date = f['fixture']['date'][:10]
-                home = f['teams']['home']['name']
-                away = f['teams']['away']['name']
-                score = f"{f['goals']['home']}-{f['goals']['away']}"
-                xg_h = f['teams']['home'].get('xg', 'N/A')
-                xg_a = f['teams']['away'].get('xg', 'N/A')
-                st.write(f"- {date} | {home} vs {away} | {score} | xG: {xg_h}-{xg_a}")
-    
-    with st.expander("📊 DÉTAILS TECHNIQUES"):
-        xg_status_h = f"✅ xG ({d['xg_h_matches']} matchs)" if d['using_xg_h'] else "⚠️ Buts réels"
-        xg_status_a = f"✅ xG ({d['xg_a_matches']} matchs)" if d['using_xg_a'] else "⚠️ Buts réels"
-        
-        st.write(f"""
-        **Modèle Dixon-Coles + xG Pondéré :**
-        - **Mode de calcul** : {d['mode']}
-        - Moyenne ligue : **{d['league_avg']:.2f}** buts/match
-        - λ {d['t_h']} : **{d['lh']:.2f}** buts attendus {xg_status_h}
-        - λ {d['t_a']} : **{d['la']:.2f}** buts attendus {xg_status_a}
-        - Pondération temporelle : Décroissance exponentielle 10%/match
-        - Correction scores faibles : Activée
-        - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}** configurations
-        
-        *{"Stats agrégées toutes compétitions" if d['mode'] == "Global" else f"Stats spécifiques {d['mode']}"}*
-        """)
-
-
-st.markdown("""
-    <div class='footer'>
-        DÉVELOPPÉ PAR ITROZ | 
-        <a href='https://github.com/VOTRE_PROFIL' target='_blank'>GITHUB SOURCE</a>
-    </div>
-""", unsafe_allow_html=True)
+                xg_a = f['teams']['away'].get('xg
