@@ -10,70 +10,55 @@ st.set_page_config(page_title="iTrOz Predictor Master", layout="wide")
 # --- STYLE CSS (JAUNE, NOIR, GLASSMORPHISM, GIF BACKGROUND) ---
 st.markdown("""
     <style>
-    @keyframes subtleDistort {
-        0% { filter: hue-rotate(0deg) brightness(1); }
-        50% { filter: hue-rotate(2deg) brightness(1.1); }
-        100% { filter: hue-rotate(0deg) brightness(1); }
-    }
-
     .stApp {
         background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
         background-size: cover;
         background-attachment: fixed;
     }
-
-    /* Overlay sombre pour lisibilité */
-    .stApp > div:first-child { 
-        background-color: rgba(0, 0, 0, 0.9); 
-    }
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.92); }
     
-    /* Global Text */
     h1, h2, h3, p, span, label, .stMetric div { 
         color: #FFD700 !important; 
         font-family: 'Monospace', sans-serif !important; 
-        letter-spacing: 1px;
+        text-transform: uppercase;
     }
 
-    /* Glassmorphism Containers */
     .glass-card {
-        background: rgba(255, 255, 255, 0.03) !important;
-        backdrop-filter: blur(15px) !important;
-        -webkit-backdrop-filter: blur(15px) !important;
-        border: 1px solid rgba(255, 215, 0, 0.2) !important;
-        border-radius: 15px !important;
+        background: rgba(255, 255, 255, 0.02) !important;
+        backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 215, 0, 0.15);
+        border-radius: 15px;
         padding: 25px;
         margin-bottom: 20px;
     }
 
-    /* Inputs & Selectbox */
-    div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input {
-        background-color: rgba(0, 0, 0, 0.6) !important;
-        border: 1px solid rgba(255, 215, 0, 0.3) !important;
+    div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, div[data-baseweb="radio"] {
+        background-color: rgba(0, 0, 0, 0.7) !important;
+        border: 1px solid rgba(255, 215, 0, 0.2) !important;
         color: #FFD700 !important;
     }
 
-    /* Styled Buttons */
     div.stButton > button {
-        background: rgba(255, 215, 0, 0.1) !important;
+        background: rgba(255, 215, 0, 0.05) !important;
         border: 1px solid #FFD700 !important;
         color: #FFD700 !important;
-        border-radius: 10px !important;
-        text-transform: uppercase !important;
-        font-weight: bold !important;
-        transition: 0.4s all;
+        height: 3em;
+        font-weight: bold;
+        transition: 0.3s;
         width: 100%;
+        margin-top: 10px;
     }
     
     div.stButton > button:hover { 
         background: #FFD700 !important; 
         color: #000 !important;
-        box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
     }
 
-    /* Table & Dataframe Customization */
+    /* Table Style */
     .stDataFrame, [data-testid="stTable"] {
-        background: rgba(0,0,0,0.5) !important;
-        border: 1px solid rgba(255, 215, 0, 0.2);
+        background: rgba(0,0,0,0.8) !important;
+        border: 1px solid rgba(255, 215, 0, 0.1);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -97,22 +82,25 @@ def get_stats(team_id, league_id):
     scored = [float(m['teams']['home' if m['teams']['home']['id'] == team_id else 'away'].get('xg') or m['goals']['home' if m['teams']['home']['id'] == team_id else 'away'] or 0) for m in f]
     return np.mean(scored), np.std(scored)
 
-# --- INTERFACE ---
-st.markdown("<h1 style='text-align:center; letter-spacing:10px;'>ITROZ PREDICTOR</h1>", unsafe_allow_html=True)
+# --- INTERFACE MAIN ---
+st.markdown("<h1 style='text-align:center; letter-spacing:15px; margin-bottom:40px;'>ITROZ PREDICTOR</h1>", unsafe_allow_html=True)
 
-# Barre Latérale / Settings
-with st.sidebar:
-    st.markdown("### CONFIGURATION")
-    bankroll = st.number_input("CAPITAL TOTAL", value=100.0)
-    st.markdown("### MODE DE PARI")
-    risk_mode = st.radio("PROFIL", ["🛡️ SAFE", "⚖️ MID", "🔥 JOUEUR"], label_visibility="collapsed")
-    risk_map = {"🛡️ SAFE": 0.1, "⚖️ MID": 0.25, "🔥 JOUEUR": 0.5}
-
-# Sélection Match
-leagues = {"Premier League": 39, "Ligue 1": 61, "La Liga": 140, "Bundesliga": 78, "Serie A": 135}
+# SECTION 1 : CONFIGURATION (SUR LE MAIN)
 st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+st.markdown("### 1. CONFIGURATION DU CAPITAL")
+c_bank, c_risk = st.columns([1, 2])
+bankroll = c_bank.number_input("SOLDE TOTAL (€)", value=100.0)
+risk_mode = c_risk.radio("STRATEGIE DE MISE", ["🛡️ SAFE", "⚖️ MID", "🔥 JOUEUR"], horizontal=True)
+risk_map = {"🛡️ SAFE": 0.1, "⚖️ MID": 0.25, "🔥 JOUEUR": 0.5}
+st.markdown("</div>", unsafe_allow_html=True)
+
+# SECTION 2 : SELECTION DU MATCH
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+st.markdown("### 2. SELECTION DU MATCH")
+leagues = {"Premier League": 39, "Ligue 1": 61, "La Liga": 140, "Bundesliga": 78, "Serie A": 135}
 col_l, col_h, col_a = st.columns(3)
-l_name = col_l.selectbox("LIGUE", list(leagues.keys()))
+
+l_name = col_l.selectbox("CHAMPIONNAT", list(leagues.keys()))
 league_id = leagues[l_name]
 
 teams_data = call_api("teams", {"league": league_id, "season": SEASON})
@@ -122,9 +110,8 @@ t_h = col_h.selectbox("DOMICILE", sorted(team_map.keys()))
 t_a = col_a.selectbox("EXTERIEUR", sorted(team_map.keys()), index=1)
 st.markdown("</div>", unsafe_allow_html=True)
 
-if st.button("LANCER L'ANALYSE"):
-    with st.spinner("CALCUL EN COURS..."):
-        # Stats & Modélisation
+if st.button("CALCULER LES PROBABILITES"):
+    with st.spinner("ANALYSE DES FLUX DE DONNEES..."):
         m_h, s_h = get_stats(team_map[t_h], league_id)
         m_a, s_a = get_stats(team_map[t_a], league_id)
         
@@ -134,17 +121,18 @@ if st.button("LANCER L'ANALYSE"):
         
         p_h, p_n, p_a = np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
 
-        # Résultats Principaux
+        # SECTION 3 : RESULTATS
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.markdown("### 3. PROBABILITES STATISTIQUES")
         res1, res2, res3 = st.columns(3)
         res1.metric(t_h.upper(), f"{p_h*100:.1f}%")
         res2.metric("NUL", f"{p_n*100:.1f}%")
         res3.metric(t_a.upper(), f"{p_a*100:.1f}%")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Value & Kelly
+        # SECTION 4 : VALUE & MISE
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.subheader("VALUE ET MISE")
+        st.markdown("### 4. ANALYSE DES COTES")
         vc1, vc2, vc3 = st.columns(3)
         c_h = vc1.number_input(f"COTE {t_h}", value=2.0)
         c_n = vc2.number_input("COTE NUL", value=3.2)
@@ -157,21 +145,32 @@ if st.button("LANCER L'ANALYSE"):
             if ev > 1.05:
                 k = ((c-1)*p - (1-p)) / (c-1)
                 mise = max(0, bankroll * k * risk_map[risk_mode])
-                summary.append({"PARI": lab, "PROBABILITE": f"{p*100:.1f}%", "VALUE": f"{ev:.2f}", "MISE": f"{mise:.2f}€"})
+                summary.append({"PARI": lab, "PROBA": f"{p*100:.1f}%", "VALUE": f"{ev:.2f}", "MISE": f"{mise:.2f}€"})
         
         if summary: st.table(pd.DataFrame(summary))
-        else: st.write("AUCUNE VALUE DETECTEE")
+        else: st.info("AUCUNE OPPORTUNITE DETECTEE")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Scores Exacts
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.subheader("SCORES EXACTS")
-        flat = matrix.flatten()
-        top3 = np.argsort(flat)[-3:][::-1]
-        sc_cols = st.columns(3)
-        for i, idx in enumerate(top3):
-            h, a = divmod(idx, 6)
-            sc_cols[i].metric(f"{h} - {a}", f"{matrix[h,a]*100:.1f}%")
-        st.markdown("</div>", unsafe_allow_html=True)
+        # SECTION 5 : SCORES ET AUTRES
+        col_end_1, col_end_2 = st.columns(2)
+        
+        with col_end_1:
+            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+            st.markdown("### SCORES LES PLUS PROBABLES")
+            flat = matrix.flatten()
+            top3 = np.argsort(flat)[-3:][::-1]
+            for idx in top3:
+                h, a = divmod(idx, 6)
+                st.write(f"SCORE {h} - {a} : **{matrix[h,a]*100:.1f}%**")
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        with col_end_2:
+            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+            st.markdown("### MARCHES SPECIAUX")
+            p_btts = np.sum(matrix[1:, 1:])
+            p_o25 = sum(matrix[i, j] for i in range(6) for j in range(6) if i+j > 2.5)
+            st.write(f"BTTS (OUI) : **{p_btts*100:.1f}%**")
+            st.write(f"OVER 2.5 : **{p_o25*100:.1f}%**")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("<p style='text-align:center; opacity:0.4; letter-spacing:3px;'>ITROZ MASTER EDITION</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; opacity:0.3; letter-spacing:5px; margin-top:50px;'>ITROZ SYSTEM v7.0</p>", unsafe_allow_html=True)
