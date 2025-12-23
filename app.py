@@ -3,123 +3,151 @@ import requests
 import numpy as np
 from scipy.stats import poisson
 from datetime import datetime
-import pandas as pd
 
-# --- CONFIGURATION ET STYLE GLASSMORPHISM ---
-st.set_page_config(page_title="L'ALGO • iTrOz", layout="wide")
+# --- CONFIGURATION ET STYLE ---
+st.set_page_config(page_title="iTrOz Predictor - L'ALGO", layout="wide")
 
-GIF_URL = "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbjcwd3V2YXVyeWg4Z3h2NjdlZmlueWlmaDV6enFnaDM4NDJid2F6ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VZrfUvQjXaGEQy1RSn/giphy.gif"
-
-st.markdown(f"""
+st.markdown("""
     <style>
-    .stApp {{
-        background: linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0.85)), url("{GIF_URL}");
-        background-size: cover; background-attachment: fixed;
-    }}
-    h1, h2, h3, p, span, label {{ color: #FFD700 !important; font-family: 'Monaco', monospace; }}
-    .glass-card {{
-        background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px);
-        border: 1px solid rgba(255, 215, 0, 0.3); padding: 25px; border-radius: 15px; margin-bottom: 20px;
-    }}
-    .stButton>button {{
-        background: rgba(255, 215, 0, 0.15) !important; color: #FFD700 !important;
-        border: 2px solid #FFD700 !important; backdrop-filter: blur(10px); height: 55px; font-weight: bold;
-    }}
-    .stNumberInput div, .stSelectbox div, .stDateInput div, .stSlider div {{
-        background: rgba(0, 0, 0, 0.5) !important; border: 1px solid rgba(255, 215, 0, 0.3) !important;
-    }}
+    .stApp { background-color: #0E1117; }
+    h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; }
+    .bet-card {
+        background: rgba(255, 255, 255, 0.03);
+        padding: 25px; border-radius: 15px;
+        border: 1px solid rgba(255, 215, 0, 0.2);
+        margin-bottom: 20px;
+    }
+    .verdict-text {
+        font-size: 24px; font-weight: bold; text-align: center; color: #FFD700;
+        border: 2px solid #FFD700; padding: 15px; border-radius: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIQUE MATHÉMATIQUE (DIXON-COLES) ---
-def calculate_matrix(lh, la):
+# --- CONFIGURATION API ---
+API_KEY = st.secrets["MY_API_KEY"]
+BASE_URL = "https://v3.football.api-sports.io/"
+HEADERS = {'x-apisports-key': API_KEY}
+SEASON = 2025
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1453026279275106355/gbYAwBRntm1FCoqoBTz5lj1SCe2ijyeHHYoe4CFYwpzOw2DO-ozcCsgkK_53HhB-kFGE"
+
+# --- MODES DE L'ALGO ---
+ALGO_MODES = {
+    "SAFE": {"min_ev": 1.15, "kelly": 0.10, "max_legs": 2, "color": "#00FF7F"},
+    "MID SAFE": {"min_ev": 1.10, "kelly": 0.20, "max_legs": 3, "color": "#ADFF2F"},
+    "MID": {"min_ev": 1.07, "kelly": 0.35, "max_legs": 4, "color": "#FFD700"},
+    "MID AGRESSIF": {"min_ev": 1.04, "kelly": 0.50, "max_legs": 5, "color": "#FF8C00"},
+    "AGRESSIF": {"min_ev": 1.02, "kelly": 0.75, "max_legs": 8, "color": "#FF4500"},
+    "FOU": {"min_ev": 0.98, "kelly": 1.00, "max_legs": 15, "color": "#FF0000"}
+}
+
+# --- FONCTIONS TECHNIQUES ---
+@st.cache_data(ttl=3600)
+def get_api(endpoint, params):
+    try:
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=10)
+        return r.json().get('response', [])
+    except: return []
+
+def send_to_discord(ticket_opps, cote, mise, ev, mode_name, color):
+    embed = {
+        "title": f"🏆 TICKET L'ALGO - MODE {mode_name}",
+        "color": int(color.replace("#", ""), 16),
+        "fields": [
+            {"name": "🏟️ SÉLECTIONS", "value": "\n".join([f"**{o['Match']}**\n└ {o['Pari']} (@{o['Cote']})" for o in ticket_opps]), "inline": False},
+            {"name": "📈 COTE", "value": f"**{cote:.2f}**", "inline": True},
+            {"name": "💰 MISE", "value": f"**{mise:.2f}€**", "inline": True},
+            {"name": "🎯 EV", "value": f"**{ev:.2f}**", "inline": True}
+        ],
+        "footer": {"text": "iTrOz Predictor • Scan Automatique"},
+        "timestamp": datetime.now().isoformat()
+    }
+    requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]})
+
+# --- CŒUR DE L'ALGO (DIXON-COLES) ---
+def calculate_probs(lh, la):
+    tau = [-0.13, 0.065, 0.065, 0.13] # Correction Dixon-Coles
     matrix = np.zeros((10, 10))
     for x in range(10):
         for y in range(10):
-            matrix[x, y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
-    return matrix / matrix.sum()
-
-# --- HEADER ---
-st.markdown("<h1 style='text-align:center; letter-spacing:10px;'>L'ALGO PRO TERMINAL</h1>", unsafe_allow_html=True)
-
-# --- MODULE 1 : CONFIGURATION GLOBALE ---
-with st.container():
-    st.markdown("<div class='glass-card'><h3>⚙️ PARAMÈTRES DE SESSION</h3>", unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: 
-        bankroll = st.number_input("CAPITAL (€)", value=100.0)
-        scan_date = st.date_input("DATE DU SCAN", datetime.now())
-    with c2: 
-        league_choice = st.selectbox("LIGUES", ["Toutes les Ligues", "Premier League", "La Liga", "Ligue 1", "Serie A", "Bundesliga"])
-        mode_algo = st.selectbox("MODE DE RISQUE", ["SAFE", "MID SAFE", "MID", "AGRESSIF", "FOU"], index=2)
-    with c3: 
-        threshold = st.slider("SEUIL OVER/UNDER", 0.5, 4.5, 2.5, 0.5)
-    with c4:
-        st.write("Statut API: ✅ Connecté")
-        st.write("Version: L'ALGO v3.2")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# --- MODULE 2 : ANALYSE MANUELLE (L'ancienne section) ---
-st.markdown("### 🔍 ANALYSE INDIVIDUELLE")
-with st.expander("Ouvrir l'analyseur de match manuel"):
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        h_team = st.text_input("Équipe Domicile", "Team H")
-        h_lambda = st.number_input("Lambda Domicile (xG)", value=1.5)
-    with col_m2:
-        a_team = st.text_input("Équipe Extérieur", "Team A")
-        a_lambda = st.number_input("Lambda Extérieur (xG)", value=1.2)
+            prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
+            if x==0 and y==0: prob *= (1 + tau[0]*lh*la)
+            elif x==1 and y==0: prob *= (1 + tau[1]*lh)
+            elif x==0 and y==1: prob *= (1 + tau[2]*la)
+            elif x==1 and y==1: prob *= (1 + tau[3])
+            matrix[x, y] = max(prob, 0)
+    matrix /= matrix.sum()
     
-    if st.button("CALCULER ANALYSE BRUTE"):
-        m = calculate_matrix(h_lambda, a_lambda)
-        p_h, p_n, p_a = np.sum(np.tril(m, -1)), np.sum(np.diag(m)), np.sum(np.triu(m, 1))
-        st.write(f"📊 **Probabilités :** Victoire {h_team}: {p_h*100:.1f}% | Nul: {p_n*100:.1f}% | Victoire {a_team}: {p_a*100:.1f}%")
+    return {
+        "p_h": np.sum(np.tril(matrix, -1)),
+        "p_n": np.sum(np.diag(matrix)),
+        "p_a": np.sum(np.triu(matrix, 1)),
+        "p_btts": np.sum(matrix[1:, 1:]),
+        "matrix": matrix
+    }
 
-# --- MODULE 3 : AUDIT & SCAN AUTOMATIQUE ---
-st.markdown("### 🚀 SCANNER & TICKET AUTOMATIQUE")
-if st.button("EXÉCUTER LE SCAN COMPLET DU " + scan_date.strftime('%d/%m/%Y')):
-    with st.spinner("L'ALGO scanne les marchés..."):
-        # Simulation des données API
-        results = [
-            {"Match": "Real Madrid - Barça", "Pari": "1", "Cote": 2.10, "Proba": 0.55, "EV": 1.15},
-            {"Match": "PSG - Monaco", "Pari": "BTTS OUI", "Cote": 1.75, "Proba": 0.68, "EV": 1.19},
-            {"Match": "Man City - Arsenal", "Pari": f"Over {threshold}", "Cote": 1.90, "Proba": 0.60, "EV": 1.14}
-        ]
+# --- INTERFACE PRINCIPALE ---
+st.title("iTrOz Predictor - L'ALGO PRO")
+
+col_l, col_r = st.columns(2)
+with col_l:
+    leagues = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135}
+    l_name = st.selectbox("LIGUE", list(leagues.keys()))
+    l_id = leagues[l_name]
+with col_r:
+    scan_date = st.date_input("DATE DU SCAN", datetime.now())
+
+threshold = st.slider("SEUIL OVER/UNDER", 0.5, 4.5, 2.5, 1.0)
+bankroll = st.number_input("BANKROLL TOTAL (€)", value=100.0)
+mode_name = st.select_slider("TEMPÉRAMENT DE L'ALGO", options=list(ALGO_MODES.keys()), value="MID")
+conf = ALGO_MODES[mode_name]
+
+if st.button("🚀 EXÉCUTER L'ALGO"):
+    with st.spinner("Analyse du marché en cours..."):
+        fixtures = get_api("fixtures", {"league": l_id, "season": SEASON, "date": scan_date.strftime('%Y-%m-%d')})
+        all_opps = []
+
+        for f in fixtures:
+            f_id = f['fixture']['id']
+            # Simulation Lambda (Simplifiée pour l'exemple, à lier à tes stats xG)
+            lh, la = 1.5, 1.2 
+            probs = calculate_probs(lh, la)
+            
+            # Récupération Cotes
+            odds_res = get_api("odds", {"fixture": f_id})
+            if not odds_res: continue
+            
+            bookie_bets = odds_res[0]['bookmakers'][0]['bets']
+            
+            # Mapping des marchés pour L'ALGO
+            for bet in bookie_bets:
+                if bet['name'] == "Match Winner":
+                    for v in bet['values']:
+                        p = probs['p_h'] if v['value']=="Home" else (probs['p_n'] if v['value']=="Draw" else probs['p_a'])
+                        all_opps.append({"Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}", "Pari": v['value'], "Cote": float(v['odd']), "Proba IA": p, "EV": p * float(v['odd'])})
+                if bet['name'] == "Both Teams Score" and v['value'] == "Yes":
+                    p = probs['p_btts']
+                    all_opps.append({"Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}", "Pari": "BTTS Oui", "Cote": float(v['odd']), "Proba IA": p, "EV": p * float(v['odd'])})
+
+        # Filtrage et Ticket
+        valid_opps = sorted([o for o in all_opps if o['EV'] >= conf['min_ev']], key=lambda x: x['EV'], reverse=True)[:conf['max_legs']]
         
-        # --- SECTION AUDIT ---
-        st.markdown("<div class='glass-card'><h4>🔍 AUDIT VALUE DES MARCHÉS</h4>", unsafe_allow_html=True)
-        st.table(pd.DataFrame(results)[["Match", "Pari", "Cote", "EV"]])
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        # --- SECTION TICKET ---
-        st.markdown("<div class='glass-card'><h4>💰 TICKET OPTIMAL GÉNÉRÉ</h4>", unsafe_allow_html=True)
-        total_cote = np.prod([o['Cote'] for o in results])
-        total_prob = np.prod([o['Proba'] for o in results])
-        
-        # Kelly Criterion
-        b = total_cote - 1
-        kelly = ((b * total_prob - (1 - total_prob)) / b) * 0.2 if b > 0 else 0
-        mise = max(0, bankroll * kelly)
+        if valid_opps:
+            cote_t = np.prod([o['Cote'] for o in valid_opps])
+            prob_t = np.prod([o['Proba IA'] for o in valid_opps])
+            ev_t = cote_t * prob_t
+            
+            # Kelly
+            b = cote_t - 1
+            k_mise = ((b * prob_t - (1 - prob_t)) / b) * conf['kelly'] if b > 0 else 0
+            mise_f = max(0, bankroll * k_mise)
 
-        col_res1, col_res2 = st.columns(2)
-        with col_res1:
-            for r in results:
-                st.write(f"✅ {r['Match']} : **{r['Pari']}** (@{r['Cote']})")
-        with col_res2:
-            st.markdown(f"**COTE TOTALE : {total_cote:.2f}**")
-            st.markdown(f"**MISE RECOMMANDÉE : {mise:.2f}€**")
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='verdict-text'>TICKET GÉNÉRÉ : {cote_t:.2f} (@{mise_f:.2f}€)</div>", unsafe_allow_html=True)
+            st.table(valid_opps)
+            
+            send_to_discord(valid_opps, cote_t, mise_f, ev_t, mode_name, conf['color'])
+            st.toast("Signal transmis à Discord !")
+        else:
+            st.error("Aucune opportunité détectée par L'ALGO pour ce mode.")
 
-        # WEBHOOK DISCORD
-        webhook_url = "https://discord.com/api/webhooks/1453026279275106355/gbYAwBRntm1FCoqoBTz5lj1SCe2ijyeHHYoe4CFYwpzOw2DO-ozcCsgkK_53HhB-kFGE"
-        discord_msg = {
-            "embeds": [{
-                "title": f"🔱 SIGNAL L'ALGO - {scan_date.strftime('%d/%m/%Y')}",
-                "color": 16766464,
-                "description": f"**Cote: {total_cote:.2f} | Mise: {mise:.2f}€**\n\n" + "\n".join([f"• {o['Match']} : {o['Pari']}" for o in results])
-            }]
-        }
-        requests.post(webhook_url, json=discord_msg)
-        st.toast("SIGNAL DISCORD ENVOYÉ")
-
-st.markdown("<p style='text-align:center; opacity:0.3; margin-top:50px;'>iTrOz Predictor • L'ALGO v3.2 • Système de grade militaire</p>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; margin-top:50px; opacity:0.5;'>iTrOz Predictor v3.0 - L'ALGO Propriétaire</div>", unsafe_allow_html=True)
