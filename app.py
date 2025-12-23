@@ -420,7 +420,7 @@ if st.session_state.simulation_done:
         m_finale = max(bankroll * 0.30, m_finale) 
         m_finale = min(m_finale, bankroll * 1.00) 
         
-        st.markdown(f"<div class='verdict-text'>IA RECOMMANDE : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='verdict-text'>RECOMMANDATION : {best_o['n']} | MISE : {m_finale:.2f}€</div>", unsafe_allow_html=True)
     else:
         st.markdown("<div class='verdict-text'>AUCUN VALUE DÉTECTÉ</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
