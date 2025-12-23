@@ -88,7 +88,7 @@ def send_to_discord(ticket, total_odd, mode):
     requests.post(DISCORD_WEBHOOK, json=payload)
 
 # --- NAVIGATION ---
-st.title(" CLEMENTRNXX PREDICTOR V5.5")
+st.title(" CLEMENTRNXX PREDICTOR V9.5")
 tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
 
 with tab1:
