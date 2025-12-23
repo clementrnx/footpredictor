@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import numpy as np
 from scipy.stats import poisson
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="iTrOz Predictor", layout="wide")
 
@@ -116,6 +117,124 @@ def get_api(endpoint, params):
     except: 
         return []
 
+@st.cache_data(ttl=3600)
+def get_league_context(league_id, season):
+    """Récupère le contexte statistique de la ligue"""
+    standings = get_api("standings", {"league": league_id, "season": season})
+    if not standings or not standings[0].get('league', {}).get('standings'):
+        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
+    
+    total_home_goals = 0
+    total_away_goals = 0
+    total_home_conceded = 0
+    total_away_conceded = 0
+    total_matches = 0
+    
+    for team in standings[0]['league']['standings'][0]:
+        home_stats = team['home']
+        away_stats = team['away']
+        
+        total_home_goals += home_stats['goals']['for']
+        total_home_conceded += home_stats['goals']['against']
+        total_away_goals += away_stats['goals']['for']
+        total_away_conceded += away_stats['goals']['against']
+        total_matches += home_stats['played']
+    
+    if total_matches == 0:
+        return {'avg_home': 1.5, 'avg_away': 1.2, 'avg_total': 2.7}
+    
+    return {
+        'avg_home': total_home_goals / total_matches,
+        'avg_away': total_away_goals / total_matches,
+        'avg_home_conceded': total_home_conceded / total_matches,
+        'avg_away_conceded': total_away_conceded / total_matches,
+        'avg_total': (total_home_goals + total_away_goals) / (total_matches * 2)
+    }
+
+@st.cache_data(ttl=1800)
+def get_weighted_xg_stats(team_id, league_id, season, is_home=True):
+    """
+    Calcule les xG moyens pondérés temporellement
+    Les matchs récents ont plus de poids (décroissance exponentielle)
+    """
+    fixtures = get_api("fixtures", {"team": team_id, "league": league_id, "season": season, "last": 10})
+    
+    if not fixtures:
+        return None
+    
+    xg_for_weighted = 0
+    xg_against_weighted = 0
+    goals_for_weighted = 0
+    goals_against_weighted = 0
+    total_weight = 0
+    matches_count = 0
+    
+    # Tri par date (du plus récent au plus ancien)
+    fixtures_sorted = sorted(fixtures, key=lambda x: x['fixture']['date'], reverse=True)
+    
+    for idx, match in enumerate(fixtures_sorted):
+        if match['fixture']['status']['short'] != 'FT':
+            continue
+        
+        # Pondération exponentielle : match le plus récent = poids 1.0, décroissance de 10% par match
+        weight = 0.9 ** idx
+        
+        # Déterminer si l'équipe jouait à domicile ou extérieur
+        team_is_home = match['teams']['home']['id'] == team_id
+        
+        # Filtrer selon le contexte demandé (domicile ou extérieur)
+        if is_home and not team_is_home:
+            continue
+        if not is_home and team_is_home:
+            continue
+        
+        # Récupérer les xG (Expected Goals)
+        if team_is_home:
+            xg_for = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
+            xg_against = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
+            goals_for = match['goals']['home'] or 0
+            goals_against = match['goals']['away'] or 0
+        else:
+            xg_for = float(match['teams']['away'].get('xg') or match['goals']['away'] or 0)
+            xg_against = float(match['teams']['home'].get('xg') or match['goals']['home'] or 0)
+            goals_for = match['goals']['away'] or 0
+            goals_against = match['goals']['home'] or 0
+        
+        # Accumuler avec pondération
+        xg_for_weighted += xg_for * weight
+        xg_against_weighted += xg_against * weight
+        goals_for_weighted += goals_for * weight
+        goals_against_weighted += goals_against * weight
+        total_weight += weight
+        matches_count += 1
+    
+    if total_weight == 0 or matches_count == 0:
+        return None
+    
+    return {
+        'xg_for': xg_for_weighted / total_weight,
+        'xg_against': xg_against_weighted / total_weight,
+        'goals_for': goals_for_weighted / total_weight,
+        'goals_against': goals_against_weighted / total_weight,
+        'matches_count': matches_count
+    }
+
+@st.cache_data(ttl=1800)
+def get_comprehensive_stats(team_id, league_id, season):
+    """Récupère les stats complètes incluant xG pondéré"""
+    # Stats globales de l'équipe
+    base_stats = get_api("teams/statistics", {"league": league_id, "season": season, "team": team_id})
+    
+    # xG pondérés
+    xg_home = get_weighted_xg_stats(team_id, league_id, season, is_home=True)
+    xg_away = get_weighted_xg_stats(team_id, league_id, season, is_home=False)
+    
+    return {
+        'base': base_stats,
+        'xg_home': xg_home,
+        'xg_away': xg_away
+    }
+
 if 'simulation_done' not in st.session_state:
     st.session_state.simulation_done = False
     st.session_state.data = {}
@@ -146,22 +265,55 @@ if teams:
     if st.button("Lancer la prédiction"):
         id_h, id_a = teams[t_h], teams[t_a]
         
-        with st.spinner("🔍 Analyse en cours..."):
-            # Récupération des stats DANS LA LIGUE CHOISIE
-            s_h = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_h})
-            s_a = get_api("teams/statistics", {"league": l_id, "season": SEASON, "team": id_a})
+        with st.spinner("🔍 Analyse xG pondérée + forme récente..."):
+            # Contexte de la ligue
+            league_ctx = get_league_context(l_id, SEASON)
             
-            if s_h and s_a:
-                # Stats brutes DANS CETTE LIGUE (déjà normalisées par l'API)
-                att_h_home = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('home') or 1.5)
-                def_a_away = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('away') or 1.5)
-                att_a_away = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('away') or 1.5)
-                def_h_home = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('home') or 1.5)
+            # Stats complètes avec xG pondéré
+            stats_h = get_comprehensive_stats(id_h, l_id, SEASON)
+            stats_a = get_comprehensive_stats(id_a, l_id, SEASON)
+            
+            if stats_h and stats_a:
+                s_h = stats_h['base']
+                s_a = stats_a['base']
                 
-                # Calcul simple des lambdas (Poisson pur)
-                # Utilisation directe des moyennes domicile/extérieur sans sur-ajustement
-                lh = (att_h_home + def_a_away) / 2
-                la = (att_a_away + def_h_home) / 2
+                # PRIORITÉ 1 : Utiliser xG pondéré si disponible
+                if stats_h['xg_home'] and stats_h['xg_home']['matches_count'] >= 3:
+                    att_h_home = stats_h['xg_home']['xg_for']
+                    def_h_home = stats_h['xg_home']['xg_against']
+                    using_xg_h = True
+                else:
+                    # Fallback sur buts réels
+                    att_h_home = float(s_h.get('goals',{}).get('for',{}).get('average',{}).get('home') or league_ctx['avg_home'])
+                    def_h_home = float(s_h.get('goals',{}).get('against',{}).get('average',{}).get('home') or league_ctx['avg_home_conceded'])
+                    using_xg_h = False
+                
+                if stats_a['xg_away'] and stats_a['xg_away']['matches_count'] >= 3:
+                    att_a_away = stats_a['xg_away']['xg_for']
+                    def_a_away = stats_a['xg_away']['xg_against']
+                    using_xg_a = True
+                else:
+                    # Fallback sur buts réels
+                    att_a_away = float(s_a.get('goals',{}).get('for',{}).get('average',{}).get('away') or league_ctx['avg_away'])
+                    def_a_away = float(s_a.get('goals',{}).get('against',{}).get('average',{}).get('away') or league_ctx['avg_away_conceded'])
+                    using_xg_a = False
+                
+                # Calcul des forces relatives (modèle Dixon-Coles avec xG)
+                attack_strength_h = att_h_home / league_ctx['avg_home'] if league_ctx['avg_home'] > 0 else 1.0
+                defense_weakness_a = def_a_away / league_ctx['avg_away_conceded'] if league_ctx['avg_away_conceded'] > 0 else 1.0
+                
+                attack_strength_a = att_a_away / league_ctx['avg_away'] if league_ctx['avg_away'] > 0 else 1.0
+                defense_weakness_h = def_h_home / league_ctx['avg_home_conceded'] if league_ctx['avg_home_conceded'] > 0 else 1.0
+                
+                # Lambda final avec xG
+                lh = league_ctx['avg_home'] * attack_strength_h * defense_weakness_a
+                la = league_ctx['avg_away'] * attack_strength_a * defense_weakness_h
+                
+                # Correction Dixon-Coles pour scores faibles
+                tau_00 = -0.13
+                tau_10 = 0.065
+                tau_01 = 0.065
+                tau_11 = 0.13
                 
                 # Matrice dynamique
                 max_goals = int(max(lh, la) * 2.5) + 3
@@ -169,9 +321,23 @@ if teams:
                 matrix = np.zeros((max_goals, max_goals))
                 
                 for x in range(max_goals):
-                    for y in range(max_goals): 
-                        matrix[x,y] = poisson.pmf(x, lh) * poisson.pmf(y, la)
+                    for y in range(max_goals):
+                        prob = poisson.pmf(x, lh) * poisson.pmf(y, la)
+                        
+                        # Correction Dixon-Coles
+                        if x == 0 and y == 0:
+                            prob *= (1 + tau_00 * lh * la)
+                        elif x == 1 and y == 0:
+                            prob *= (1 + tau_10 * lh)
+                        elif x == 0 and y == 1:
+                            prob *= (1 + tau_01 * la)
+                        elif x == 1 and y == 1:
+                            prob *= (1 + tau_11)
+                        
+                        matrix[x, y] = prob
                 
+                # Normalisation
+                matrix = np.maximum(matrix, 0)
                 matrix /= matrix.sum()
                 
                 st.session_state.data = {
@@ -182,7 +348,12 @@ if teams:
                     't_h': t_h, 
                     't_a': t_a,
                     'lh': lh,
-                    'la': la
+                    'la': la,
+                    'league_avg': league_ctx['avg_total'],
+                    'using_xg_h': using_xg_h,
+                    'using_xg_a': using_xg_a,
+                    'xg_h_matches': stats_h['xg_home']['matches_count'] if stats_h['xg_home'] else 0,
+                    'xg_a_matches': stats_a['xg_away']['matches_count'] if stats_a['xg_away'] else 0
                 }
                 st.session_state.simulation_done = True
 
@@ -246,19 +417,27 @@ if st.session_state.simulation_done:
     st.markdown(f"<div class='verdict-text'>AUDIT : {stat} (EV: {audit_val:.2f})</div>", unsafe_allow_html=True)
 
     st.subheader("SCORES PROBABLES")
-    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-3:][::-1], d['matrix'].shape)
-    sc1, sc2, sc3 = st.columns(3)
-    for i in range(3):
-        with [sc1, sc2, sc3][i]: st.write(f"**{idx[0][i]} - {idx[1][i]}** ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
+    idx = np.unravel_index(np.argsort(d['matrix'].ravel())[-5:][::-1], d['matrix'].shape)
+    score_cols = st.columns(5)
+    for i in range(5):
+        with score_cols[i]: 
+            st.write(f"**{idx[0][i]} - {idx[1][i]}**")
+            st.write(f"{d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%")
     
     with st.expander("📊 DÉTAILS TECHNIQUES"):
-        st.write(f"""
-        **Lambdas calculés :**
-        - λ {d['t_h']} : **{d['lh']:.2f}**
-        - λ {d['t_a']} : **{d['la']:.2f}**
-        - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}**
+        xg_status_h = f"✅ xG ({d['xg_h_matches']} matchs)" if d['using_xg_h'] else "⚠️ Buts réels"
+        xg_status_a = f"✅ xG ({d['xg_a_matches']} matchs)" if d['using_xg_a'] else "⚠️ Buts réels"
         
-        *Stats extraites UNIQUEMENT de {l_name} saison {SEASON}*
+        st.write(f"""
+        **Modèle Dixon-Coles + xG Pondéré :**
+        - Moyenne ligue : **{d['league_avg']:.2f}** buts/match
+        - λ {d['t_h']} : **{d['lh']:.2f}** buts attendus {xg_status_h}
+        - λ {d['t_a']} : **{d['la']:.2f}** buts attendus {xg_status_a}
+        - Pondération temporelle : Décroissance exponentielle 10%/match
+        - Correction scores faibles : Activée
+        - Matrice : **{d['matrix'].shape[0]}x{d['matrix'].shape[1]}** configurations
+        
+        *Les matchs récents ont plus de poids dans le calcul*
         """)
 
 st.markdown("""
