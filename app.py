@@ -167,7 +167,7 @@ with tab2:
     gc1, gc2, gc3, gc4 = st.columns(4)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
     
-    # MODIFICATION : Période (Date début et Date fin)
+    # Sélecteur de période
     d_range = gc2.date_input("PÉRIODE DU SCAN", [datetime.now(), datetime.now()], key="d_scan_range")
     
     bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
@@ -178,18 +178,16 @@ with tab2:
     risk_cfg = RISK_LEVELS[risk_mode]
     
     if st.button("GÉNÉRER "):
-        # Extraction de la période
-        if isinstance(d_range, list) and len(d_range) == 2:
+        # FIX: Vérification robuste de la période sélectionnée
+        if isinstance(d_range, (list, tuple)) and len(d_range) == 2:
             start_date, end_date = d_range
-        elif isinstance(d_range, list) and len(d_range) == 1:
-            start_date = end_date = d_range[0]
+            date_list = pd.date_range(start=start_date, end=end_date).tolist()
         else:
-            start_date = end_date = d_range
+            st.error("⚠️ Veuillez sélectionner une date de début ET une date de fin dans le calendrier.")
+            st.stop()
 
-        date_list = pd.date_range(start=start_date, end=end_date).tolist()
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
-        
         progress_bar = st.progress(0)
         
         for idx, current_date in enumerate(date_list):
