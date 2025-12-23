@@ -92,9 +92,8 @@ st.title(" CLEMENTRNXX PREDICTOR V5.5")
 tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
 
 with tab1:
-    # --- SECTION 1V1 ORIGINE ---
-    l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()))
-    scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()), key="l_1v1")
+    scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="s_1v1")
     teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
     teams = {t['team']['name']: t['team']['id'] for t in teams_res}
     
@@ -102,7 +101,7 @@ with tab1:
         c1, c2 = st.columns(2)
         team_h = c1.selectbox("DOMICILE", sorted(teams.keys()), key="th_1v1")
         team_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="ta_1v1")
-        if st.button("LANCER L'ANALYSE"):
+        if st.button("LANCER L'ANALYSE", key="btn_1v1"):
             att_h, def_h = get_team_stats(teams[team_h], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             att_a, def_a = get_team_stats(teams[team_a], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
@@ -121,18 +120,18 @@ with tab1:
         bc1, bc2 = st.columns([2, 1])
         with bc2:
             bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0, key="bk_1v1")
-            risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2)
+            risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2, key="rm_1v1")
         
         with bc1:
             i1, i2, i3, i4 = st.columns(4)
-            c_h = i1.number_input(f"Cote {th}", value=1.0)
-            c_hn = i2.number_input(f"{th}/N", value=1.0)
-            c_n2 = i3.number_input(f"N/{ta}", value=1.0)
-            c_a = i4.number_input(f"Cote {ta}", value=1.0)
+            c_h = i1.number_input(f"Cote {th}", value=1.0, key="v_h")
+            c_hn = i2.number_input(f"{th}/N", value=1.0, key="v_hn")
+            c_n2 = i3.number_input(f"N/{ta}", value=1.0, key="v_n2")
+            c_a = i4.number_input(f"Cote {ta}", value=1.0, key="v_a")
             i5, i6, i7 = st.columns(3)
-            c_12 = i5.number_input(f"{th}/{ta}", value=1.0)
-            c_by = i6.number_input("BTTS OUI", value=1.0)
-            c_bn = i7.number_input("BTTS NON", value=1.0)
+            c_12 = i5.number_input(f"{th}/{ta}", value=1.0, key="v_12")
+            c_by = i6.number_input("BTTS OUI", value=1.0, key="v_by")
+            c_bn = i7.number_input("BTTS NON", value=1.0, key="v_bn")
 
         cfg = RISK_LEVELS[risk_1v1]
         bets = [(f"Victoire {th}", c_h, r['p_h']), (f"Double Chance {th}/N", c_hn, r['p_1n']), (f"Double Chance N/{ta}", c_n2, r['p_n2']), (f"Victoire {ta}", c_a, r['p_a']), (f"Issue {th}/{ta}", c_12, r['p_12']), ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn, r['p_nobtts'])]
@@ -151,14 +150,14 @@ with tab2:
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="l_scan")
     d_range = gc2.date_input("PÉRIODE", [datetime.now(), datetime.now()], key="d_scan_range")
     bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
-    max_legs = gc4.slider("NB MATCHS MAX", 1, 30, 3)
+    max_legs = gc4.slider("NB MATCHS MAX", 1, 30, 3, key="m_legs_scan")
     
-    scope_scan = st.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
-    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
-    risk_mode = st.select_slider("RISQUE (SEUIL SURVIE)", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
+    scope_scan = st.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="sc_scan")
+    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"], key="mkt_scan")
+    risk_mode = st.select_slider("RISQUE (SEUIL SURVIE)", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID", key="rk_scan")
     risk_cfg = RISK_LEVELS[risk_mode]
     
-    if st.button("GÉNÉRER LE TICKET PARFAIT (MAX GAIN)"):
+    if st.button("GÉNÉRER LE TICKET PARFAIT (MAX GAIN)", key="btn_gen"):
         if not isinstance(d_range, (list, tuple)) or len(d_range) < 2: st.stop()
         
         date_list = pd.date_range(start=d_range[0], end=d_range[1]).tolist()
@@ -190,18 +189,16 @@ with tab2:
                         odds_res = get_api("odds", {"fixture": f['fixture']['id']})
                         if odds_res:
                             for lbl, p, m_n, m_v in tests:
-                                if p >= 0.50: # Seuil minimum individuel pour éviter les déchets
+                                if p >= 0.50:
                                     for bet in odds_res[0]['bookmakers'][0]['bets']:
                                         if bet['name'] == m_n:
                                             for val in bet['values']:
                                                 if val['value'] == m_v:
                                                     cote = float(val['odd'])
-                                                    # Calcul de l'espérance de gain (Cote * Probabilité)
                                                     all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": cote, "PROBA": p, "EV": cote * p})
             progress_bar.progress((idx_d + 1) / len(date_list))
 
-        # --- LOGIQUE TICKET MULTI-MATCHS - TRI PAR EV (MAX GAIN) ---
-        # On trie par EV décroissante pour maximiser la cote totale
+        # --- LOGIQUE TICKET MULTI-MATCHS MAX GAIN ---
         all_opps = sorted(all_opps, key=lambda x: x['EV'], reverse=True)
         final_selection, seen_matches, pdv = [], set(), 1.0
         seuil_survie = risk_cfg['p']
@@ -209,7 +206,6 @@ with tab2:
         for o in all_opps:
             if len(final_selection) >= max_legs: break
             if o['MATCH'] not in seen_matches:
-                # On ajoute tant que la probabilité cumulative du ticket respecte le seuil
                 if (pdv * o['PROBA']) >= seuil_survie:
                     final_selection.append(o)
                     seen_matches.add(o['MATCH'])
@@ -220,13 +216,13 @@ with tab2:
             st.markdown(f"""
                 <div class='verdict-box'>
                     <h2>🔥 TICKET MAX GAIN</h2>
-                    <p style='font-size:1.2rem;'>Probabilité de Vie : <b>{pdv*100:.1f}%</b> (Cible: >{seuil_survie*100:.0f}%)</p>
+                    <p style='font-size:1.2rem;'>Survie Ticket : <b>{pdv*100:.1f}%</b> (Seuil: {seuil_survie*100:.0f}%)</p>
                     <p>Cote Totale : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p>
                 </div>
             """, unsafe_allow_html=True)
             st.table(pd.DataFrame(final_selection)[["MATCH", "PARI", "COTE", "PROBA"]])
             send_to_discord(final_selection, total_odd, risk_mode)
-        else: st.error("Impossible de construire un ticket multi-matchs respectant ce seuil de survie.")
+        else: st.error("Impossible de construire un ticket respectant ce seuil de survie.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
