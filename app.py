@@ -102,13 +102,15 @@ with tab1:
     
     if teams:
         c1, c2 = st.columns(2)
-        th = c1.selectbox("DOMICILE", sorted(teams.keys()))
-        ta = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()))
+        th = sorted(teams.keys())[0] if teams else ""
+        ta = sorted(teams.keys())[1] if len(teams) > 1 else th
+        team_h = c1.selectbox("DOMICILE", sorted(teams.keys()), key="th_1v1")
+        team_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="ta_1v1")
         if st.button("LANCER L'ANALYSE"):
-            att_h, def_h = get_team_stats(teams[th], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
-            att_a, def_a = get_team_stats(teams[ta], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+            att_h, def_h = get_team_stats(teams[team_h], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+            att_a, def_a = get_team_stats(teams[team_a], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
             lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
-            st.session_state.v5_final = {"res": calculate_perfect_probs(lh, la), "th": th, "ta": ta}
+            st.session_state.v5_final = {"res": calculate_perfect_probs(lh, la), "th": team_h, "ta": team_a}
 
     if 'v5_final' in st.session_state:
         r, th, ta = st.session_state.v5_final["res"], st.session_state.v5_final["th"], st.session_state.v5_final["ta"]
@@ -165,32 +167,28 @@ with tab1:
 with tab2:
     st.subheader(" GÉNÉRATEUR DE TICKETS")
     gc1, gc2, gc3, gc4 = st.columns(4)
-    l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()))
-    
-    # Sélecteur de période
+    l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="l_scan")
     d_range = gc2.date_input("PÉRIODE DU SCAN", [datetime.now(), datetime.now()], key="d_scan_range")
-    
     bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
-    scope_scan = gc4.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL")
+    scope_scan = gc4.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="scope_scan")
     
-    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"])
-    risk_mode = st.select_slider("RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID")
+    selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"], key="markets_scan")
+    risk_mode = st.select_slider("RISQUE", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID", key="risk_scan")
     risk_cfg = RISK_LEVELS[risk_mode]
     
-    if st.button("GÉNÉRER "):
-        # FIX: Vérification robuste de la période sélectionnée
+    if st.button("GÉNÉRER ", key="btn_gen"):
         if isinstance(d_range, (list, tuple)) and len(d_range) == 2:
             start_date, end_date = d_range
             date_list = pd.date_range(start=start_date, end=end_date).tolist()
         else:
-            st.error("⚠️ Veuillez sélectionner une date de début ET une date de fin dans le calendrier.")
+            st.error("⚠️ Veuillez sélectionner une période complète (Début et Fin).")
             st.stop()
 
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         opps = []
         progress_bar = st.progress(0)
         
-        for idx, current_date in enumerate(date_list):
+        for idx_d, current_date in enumerate(date_list):
             date_str = current_date.strftime('%Y-%m-%d')
             for lid in lids:
                 fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": date_str})
@@ -229,9 +227,11 @@ with tab2:
                                                             "VALUE": p*ct
                                                         })
                                                 except: continue
-            progress_bar.progress((idx + 1) / len(date_list))
+            progress_bar.progress((idx_d + 1) / len(date_list))
         
+        # Le ticket peut contenir plusieurs paris sur le même match ou différents matchs
         final_ticket = sorted(opps, key=lambda x: x['VALUE'], reverse=True)[:risk_cfg['legs']]
+        
         if final_ticket:
             total_odd = np.prod([x['COTE'] for x in final_ticket])
             mise_totale = bank_scan * risk_cfg['kelly']
