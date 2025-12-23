@@ -172,7 +172,7 @@ with tab2:
         else: st.error("Aucune opportunité trouvée.")
 
 with tab3:
-    st.subheader("📊 CLASSEMENTS")
+    st.subheader(" CLASSEMENTS")
     l_sel = st.selectbox("LIGUE", list(LEAGUES_DICT.keys()))
     standings = get_api("standings", {"league": LEAGUES_DICT[l_sel], "season": SEASON})
     if standings:
