@@ -5,18 +5,38 @@ from scipy.stats import poisson
 
 st.set_page_config(page_title="iTrOz Predictor", layout="wide")
 
+# --- CSS AVEC EFFET AURA ET DISTORSION ---
 st.markdown("""
     <style>
+    @keyframes subtleDistort {
+        0% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
+        50% { transform: scale(1.02) contrast(1.1); filter: hue-rotate(2deg) brightness(1.1); }
+        100% { transform: scale(1.0); filter: hue-rotate(0deg) brightness(1); }
+    }
+
     .stApp {
         background-image: url("https://media.giphy.com/media/VZrfUvQjXaGEQy1RSn/giphy.gif");
         background-size: cover;
         background-attachment: fixed;
+        animation: subtleDistort 10s infinite ease-in-out;
+        overflow: hidden;
     }
-    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.88); }
+
+    .stApp::before {
+        content: "";
+        position: fixed;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
+                    rgba(255, 215, 0, 0.15) 0%, 
+                    rgba(0,0,0,0) 50%);
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .stApp > div:first-child { background-color: rgba(0, 0, 0, 0.85); position: relative; z-index: 2; }
     
     h1, h2, h3, p, span, label { color: #FFD700 !important; font-family: 'Monospace', sans-serif; letter-spacing: 2px; }
 
-    /* BOUTON GLASS LONG */
     div.stButton > button {
         background: rgba(255, 215, 0, 0.03) !important;
         backdrop-filter: blur(25px) !important;
@@ -40,29 +60,17 @@ st.markdown("""
         box-shadow: 0 0 40px rgba(255, 215, 0, 0.15);
     }
 
-    /* CHAMPS DE SAISIE GLASSMOPHISM TOTAL */
     div[data-baseweb="select"], div[data-baseweb="input"], .stNumberInput input, .stSelectbox div {
         background-color: rgba(255, 255, 255, 0.05) !important;
         backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
         border: 0.5px solid rgba(255, 215, 0, 0.15) !important;
         border-radius: 10px !important;
         color: #FFD700 !important;
     }
 
-    /* Suppression des bordures par défaut de Streamlit */
-    div[data-baseweb="base-input"] {
-        background-color: transparent !important;
-        border: none !important;
-    }
-
     .verdict-text {
-        font-size: 26px;
-        font-weight: 900;
-        text-align: center;
-        padding: 30px;
-        letter-spacing: 6px;
-        text-transform: uppercase;
+        font-size: 26px; font-weight: 900; text-align: center; padding: 30px;
+        letter-spacing: 6px; text-transform: uppercase;
         border-top: 1px solid rgba(255, 215, 0, 0.1);
         border-bottom: 1px solid rgba(255, 215, 0, 0.1);
         margin: 15px 0;
@@ -70,34 +78,28 @@ st.markdown("""
 
     .bet-card {
         background: rgba(255, 255, 255, 0.02);
-        padding: 30px;
-        border-radius: 20px;
+        padding: 30px; border-radius: 20px;
         border: 1px solid rgba(255, 215, 0, 0.05);
         margin-bottom: 40px;
     }
 
     .footer {
-        text-align: center;
-        padding: 50px 0 20px 0;
-        color: rgba(255, 215, 0, 0.6);
-        font-family: 'Monospace', sans-serif;
-        font-size: 14px;
-        letter-spacing: 3px;
+        text-align: center; padding: 50px 0 20px 0;
+        color: rgba(255, 215, 0, 0.6); font-family: 'Monospace', sans-serif; font-size: 14px;
     }
     .footer a {
-        color: #FFD700 !important;
-        text-decoration: none;
-        font-weight: bold;
-        border: 1px solid rgba(255, 215, 0, 0.2);
-        padding: 8px 15px;
-        border-radius: 5px;
-        transition: 0.3s;
-    }
-    .footer a:hover {
-        background: rgba(255, 215, 0, 0.1);
-        box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+        color: #FFD700 !important; text-decoration: none; font-weight: bold;
+        border: 1px solid rgba(255, 215, 0, 0.2); padding: 8px 15px; border-radius: 5px;
     }
     </style>
+
+    <script>
+    const doc = document.documentElement;
+    document.addEventListener('mousemove', e => {
+        doc.style.setProperty('--mouse-x', e.clientX + 'px');
+        doc.style.setProperty('--mouse-y', e.clientY + 'px');
+    });
+    </script>
 """, unsafe_allow_html=True)
 
 # Configuration API
@@ -119,7 +121,8 @@ if 'simulation_done' not in st.session_state:
 
 st.title("ITROZ PREDICTOR")
 
-leagues = {"Champions League": 2, "Premier League": 39, "La Liga": 140, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
+# On définit La Liga par défaut
+leagues = {"La Liga": 140, "Champions League": 2, "Premier League": 39, "Serie A": 135, "Bundesliga": 78, "Ligue 1": 61}
 l_name = st.selectbox("CHOISIR LA LIGUE", list(leagues.keys()))
 l_id = leagues[l_name]
 
@@ -127,9 +130,19 @@ teams_res = get_api("teams", {"league": l_id, "season": SEASON})
 teams = {t['team']['name']: t['team']['id'] for t in teams_res}
 
 if teams:
+    sorted_team_names = sorted(teams.keys())
+    
+    # --- LOGIQUE DE DÉFAUT BARCA / REAL ---
+    idx_barca = 0
+    idx_real = 1
+    
+    for i, name in enumerate(sorted_team_names):
+        if "Barcelona" in name: idx_barca = i
+        if "Real Madrid" in name: idx_real = i
+
     c1, c2 = st.columns(2)
-    t_h = c1.selectbox("DOMICILE", sorted(teams.keys()))
-    t_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), index=1)
+    t_h = c1.selectbox("DOMICILE", sorted_team_names, index=idx_barca)
+    t_a = c2.selectbox("EXTÉRIEUR", sorted_team_names, index=idx_real)
 
     if st.button("Lancer la prédiction"):
         id_h, id_a = teams[t_h], teams[t_a]
@@ -216,7 +229,6 @@ if st.session_state.simulation_done:
     for i in range(3):
         with [sc1, sc2, sc3][i]: st.write(f"**{idx[0][i]} - {idx[1][i]}** ({d['matrix'][idx[0][i], idx[1][i]]*100:.1f}%)")
 
-# --- FOOTER GITHUB ---
 st.markdown("""
     <div class='footer'>
         DÉVELOPPÉ PAR ITROZ | 
