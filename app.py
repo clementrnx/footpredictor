@@ -1,14 +1,3 @@
-Parfait ! Je vais te renvoyer **le code complet de ton application Streamlit** avec :
-
-* L’interface stylée (GIF de fond + boutons glass jaune/noir)
-* Le calcul xG pondéré + Dixon-Coles
-* Deux sections distinctes : **MODE BET** et **AUDIT DU TICKET**
-* Limite de mise **max 70 % du capital**
-* Choix du mode BET (différentes stratégies cohérentes)
-
-Tout est intégré de manière cohérente et prête à exécuter. Voici le code :
-
-```python
 import streamlit as st
 import requests
 import numpy as np
@@ -298,4 +287,3 @@ if st.session_state.simulation_done:
     opts = [
         {"name": d['t_h'], "p": d['p_h'], "c": c_h},
         {"name": "NUL", "p":
-```
