@@ -5,6 +5,7 @@ from scipy.stats import poisson
 from datetime import datetime, timedelta
 import pandas as pd
 import time
+import random
 
 # --- CONFIGURATION CLEMENTRNXX PREDICTOR V5.5 ---
 st.set_page_config(page_title="Clementrnxx Predictor V9.5", layout="wide")
@@ -87,9 +88,146 @@ def send_to_discord(ticket, total_odd, mode):
     payload = {"embeds": [{"title": f"🚀 TICKET MAX GAIN - MODE {mode}", "description": f"{matches_text}\n\n🔥 **COTE TOTALE : @{total_odd:.2f}**", "color": 16766720}]}
     requests.post(DISCORD_WEBHOOK, json=payload)
 
+# --- ALGORITHME GÉNÉTIQUE POUR OPTIMISATION TICKET ---
+def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=100, population_size=50):
+    """
+    Optimise le ticket via algorithme génétique pour maximiser la cote totale
+    tout en respectant le seuil de survie
+    """
+    if len(all_opps) == 0:
+        return []
+    
+    # Grouper les paris par match pour éviter les doublons
+    matches_dict = {}
+    for opp in all_opps:
+        match_id = opp['MATCH']
+        if match_id not in matches_dict:
+            matches_dict[match_id] = []
+        matches_dict[match_id].append(opp)
+    
+    available_matches = list(matches_dict.keys())
+    
+    if len(available_matches) == 0:
+        return []
+    
+    def create_individual():
+        """Crée un individu (ticket) aléatoire"""
+        n_matches = min(random.randint(1, max_legs), len(available_matches))
+        selected_matches = random.sample(available_matches, n_matches)
+        individual = []
+        for match in selected_matches:
+            # Choisir un pari aléatoire pour ce match
+            individual.append(random.choice(matches_dict[match]))
+        return individual
+    
+    def fitness(individual):
+        """
+        Fonction de fitness : retourne la cote totale si survie OK, sinon 0
+        """
+        if len(individual) == 0:
+            return 0
+        
+        total_odd = np.prod([opp['COTE'] for opp in individual])
+        total_prob = np.prod([opp['PROBA'] for opp in individual])
+        
+        # Si le ticket ne respecte pas le seuil de survie, fitness = 0
+        if total_prob < seuil_survie:
+            return 0
+        
+        return total_odd
+    
+    def crossover(parent1, parent2):
+        """Croisement entre deux parents"""
+        if len(parent1) == 0 or len(parent2) == 0:
+            return parent1 if len(parent1) > 0 else parent2
+        
+        # Prendre des matchs de chaque parent sans dépasser max_legs
+        matches1 = set([opp['MATCH'] for opp in parent1])
+        matches2 = set([opp['MATCH'] for opp in parent2])
+        
+        # Combiner les matchs uniques
+        all_matches = list(matches1.union(matches2))
+        random.shuffle(all_matches)
+        
+        child = []
+        for match in all_matches[:max_legs]:
+            # Choisir le pari de parent1 ou parent2 ou un nouveau
+            if match in matches1 and match in matches2:
+                source = random.choice([parent1, parent2])
+            elif match in matches1:
+                source = parent1
+            else:
+                source = parent2
+            
+            opp = next((o for o in source if o['MATCH'] == match), None)
+            if opp:
+                child.append(opp)
+        
+        return child
+    
+    def mutate(individual, mutation_rate=0.2):
+        """Mutation : remplacer un pari aléatoire"""
+        if len(individual) == 0 or random.random() > mutation_rate:
+            return individual
+        
+        # Remplacer un pari aléatoire
+        if random.random() < 0.5 and len(individual) > 0:
+            # Changer le pari d'un match existant
+            idx = random.randint(0, len(individual) - 1)
+            match = individual[idx]['MATCH']
+            individual[idx] = random.choice(matches_dict[match])
+        else:
+            # Ajouter ou retirer un match
+            if len(individual) < max_legs and len(available_matches) > len(individual):
+                # Ajouter un nouveau match
+                current_matches = set([opp['MATCH'] for opp in individual])
+                available = [m for m in available_matches if m not in current_matches]
+                if available:
+                    new_match = random.choice(available)
+                    individual.append(random.choice(matches_dict[new_match]))
+            elif len(individual) > 1:
+                # Retirer un match
+                individual.pop(random.randint(0, len(individual) - 1))
+        
+        return individual
+    
+    # Initialiser la population
+    population = [create_individual() for _ in range(population_size)]
+    
+    best_individual = None
+    best_fitness = 0
+    
+    # Évolution
+    for generation in range(generations):
+        # Évaluer la fitness
+        fitness_scores = [(ind, fitness(ind)) for ind in population]
+        fitness_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Garder le meilleur
+        if fitness_scores[0][1] > best_fitness:
+            best_fitness = fitness_scores[0][1]
+            best_individual = fitness_scores[0][0].copy()
+        
+        # Sélection : garder les 50% meilleurs
+        selected = [ind for ind, _ in fitness_scores[:population_size // 2]]
+        
+        # Créer la nouvelle génération
+        new_population = selected.copy()
+        
+        while len(new_population) < population_size:
+            parent1 = random.choice(selected)
+            parent2 = random.choice(selected)
+            child = crossover(parent1, parent2)
+            child = mutate(child)
+            new_population.append(child)
+        
+        population = new_population
+    
+    return best_individual if best_individual else []
+
 # --- NAVIGATION ---
-st.title(" CLEMENTRNXX PREDICTOR V9.5")
-tab1, tab2, tab3 = st.tabs([" ANALYSE 1VS1", " SCANNER DE TICKETS", " STATS"])
+st.title("⚡ CLEMENTRNXX PREDICTOR V9.5")
+tab1, tab2, tab3 = st.tabs(["🔥 ANALYSE 1VS1", "🎯 SCANNER DE TICKETS", "📊 STATS"])
 
 with tab1:
     l_name = st.selectbox("LIGUE DU MATCH", list(LEAGUES_DICT.keys()), key="l_1v1")
@@ -116,7 +254,7 @@ with tab1:
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
 
-        st.subheader(" MODULE BET")
+        st.subheader("💰 MODULE BET")
         bc1, bc2 = st.columns([2, 1])
         with bc2:
             bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0, key="bk_1v1")
@@ -145,7 +283,7 @@ with tab1:
         if not found: st.warning("⚠️ AUCUN PARI NE CORRESPOND À VOS CRITÈRES.")
 
 with tab2:
-    st.subheader(" GÉNÉRATEUR DE TICKETS - MAX GAIN OPTIMISÉ")
+    st.subheader("🎯 GÉNÉRATEUR DE TICKETS - MAX GAIN OPTIMISÉ")
     gc1, gc2, gc3, gc4 = st.columns(4)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="l_scan")
     d_range = gc2.date_input("PÉRIODE", [datetime.now(), datetime.now()], key="d_scan_range")
@@ -189,7 +327,7 @@ with tab2:
                         odds_res = get_api("odds", {"fixture": f['fixture']['id']})
                         if odds_res:
                             for lbl, p, m_n, m_v in tests:
-                                if p >= 0.50:
+                                if p >= 0.30:  # Seuil minimum de probabilité
                                     for bet in odds_res[0]['bookmakers'][0]['bets']:
                                         if bet['name'] == m_n:
                                             for val in bet['values']:
@@ -198,31 +336,28 @@ with tab2:
                                                     all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": cote, "PROBA": p, "EV": cote * p})
             progress_bar.progress((idx_d + 1) / len(date_list))
 
-        # --- LOGIQUE TICKET MULTI-MATCHS MAX GAIN ---
-        all_opps = sorted(all_opps, key=lambda x: x['EV'], reverse=True)
-        final_selection, seen_matches, pdv = [], set(), 1.0
+        # --- OPTIMISATION GÉNÉTIQUE ---
         seuil_survie = risk_cfg['p']
         
-        for o in all_opps:
-            if len(final_selection) >= max_legs: break
-            if o['MATCH'] not in seen_matches:
-                if (pdv * o['PROBA']) >= seuil_survie:
-                    final_selection.append(o)
-                    seen_matches.add(o['MATCH'])
-                    pdv *= o['PROBA']
+        st.info(f"🧬 Optimisation génétique en cours... ({len(all_opps)} paris disponibles)")
+        final_selection = optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=150, population_size=60)
 
         if final_selection:
             total_odd = np.prod([x['COTE'] for x in final_selection])
+            pdv = np.prod([x['PROBA'] for x in final_selection])
+            
             st.markdown(f"""
                 <div class='verdict-box'>
-                    <h2>🔥 TICKET MAX GAIN</h2>
+                    <h2>🔥 TICKET MAX GAIN (OPTIMISÉ)</h2>
                     <p style='font-size:1.2rem;'>Survie Ticket : <b>{pdv*100:.1f}%</b> (Seuil: {seuil_survie*100:.0f}%)</p>
                     <p>Cote Totale : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p>
+                    <p>Gain Potentiel : <b>{(bank_scan * risk_cfg['kelly'] * total_odd):.2f}€</b></p>
                 </div>
             """, unsafe_allow_html=True)
             st.table(pd.DataFrame(final_selection)[["MATCH", "PARI", "COTE", "PROBA"]])
             send_to_discord(final_selection, total_odd, risk_mode)
-        else: st.error("Impossible de construire un ticket respectant ce seuil de survie.")
+        else: 
+            st.error("⚠️ Impossible de construire un ticket respectant ce seuil de survie. Essayez un mode de risque plus agressif ou augmentez la période.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
@@ -232,4 +367,4 @@ with tab3:
         df = pd.DataFrame([{"Equipe": t['team']['name'], "Pts": t['points'], "Forme": t['form']} for t in standings[0]['league']['standings'][0]])
         st.dataframe(df, use_container_width=True)
 
-st.markdown("""<a href="https://github.com/clementrnx" class="github-link" target="_blank">GITHUB : github.com/clementrnx</a>""", unsafe_allow_html=True)
+st.markdown("""<a href="https://github.com/clementrnx" class="github-link" target="_blank">🔗 GITHUB : github.com/clementrnx</a>""", unsafe_allow_html=True)
