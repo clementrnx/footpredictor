@@ -33,7 +33,19 @@ BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {'x-apisports-key': API_KEY}
 SEASON = 2025
 
-LEAGUES_DICT = {"La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, "Serie A": 135, "Bundesliga": 78}
+LEAGUES_DICT = {
+    "La Liga": 140, "Premier League": 39, "Champions League": 2, "Ligue 1": 61, 
+    "Serie A": 135, "Bundesliga": 78, "Europa League": 3, "Conference League": 848,
+    "CAN 2025 (AFCON)": 1, "Coupe du Monde": 1, "Nations League": 5,
+    "Championship (ENG)": 40, "Liga Portugal": 94, "Eredivisie": 88,
+    "Super Lig (TUR)": 203, "Pro League (BEL)": 144, "MLS": 253,
+    "Brasileirão Série A": 71, "Copa Libertadores": 13, "Copa America": 9,
+    "Ligue 2": 62, "Serie B": 136, "2. Bundesliga": 79, "FA Cup": 45,
+    "Coupe de France": 66, "Copa del Rey": 143, "Coppa Italia": 137,
+    "DFB Pokal": 81, "Carabao Cup": 48, "Community Shield": 528,
+    "Super Coupe d'Europe": 531, "Coupe du Monde des Clubs": 15,
+    "Ligue des Champions Afrique": 12, "Ligue Europa Conférence Afrique": 20
+}
 RISK_LEVELS = {
     "SAFE": {"p": 0.82, "ev": 1.02, "kelly": 0.02},
     "MID-SAFE": {"p": 0.74, "ev": 1.05, "kelly": 0.05},
