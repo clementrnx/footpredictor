@@ -66,7 +66,7 @@ def get_api(endpoint, params):
 def get_team_stats(team_id, league_id, scope_overall):
     # --- CALCUL DYNAMIQUE AVANTAGE DOMICILE/EXTERIEUR ---
     l_stats = get_api("standings", {"league": league_id, "season": SEASON})
-    h_bias, a_bias = 1.08, 0.92 # Fallback
+    h_bias, a_bias = 1.08, 0.92 
     if l_stats:
         try:
             stds = l_stats[0]['league']['standings'][0]
@@ -112,11 +112,11 @@ def calculate_perfect_probs(lh, la):
 
 def send_to_discord(ticket, total_odd, mode):
     matches_text = "\n".join([f"🔹 {t['MATCH']} : **{t['PARI']}** (@{t['COTE']}) - {t['PROBA']*100:.1f}%" for t in ticket])
-    payload = {"embeds": [{"title": f"🚀 TICKET MAX GAIN - MODE {mode}", "description": f"{matches_text}\n\n🔥 **COTE TOTALE : @{total_odd:.2f}**", "color": 16766720}]}
+    payload = {"embeds": [{"title": f"🚀 TICKET MAX COTE - MODE {mode}", "description": f"{matches_text}\n\n🔥 **COTE TOTALE : @{total_odd:.2f}**", "color": 16766720}]}
     requests.post(DISCORD_WEBHOOK, json=payload)
 
-# --- ALGORITHME GÉNÉTIQUE POUR OPTIMISATION TICKET ---
-def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=100, population_size=50):
+# --- ALGORITHME GÉNÉTIQUE : LOGIQUE MAX COTE ---
+def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=150, population_size=60):
     if len(all_opps) == 0: return []
     matches_dict = {}
     for opp in all_opps:
@@ -132,32 +132,12 @@ def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=100, p
         return [random.choice(matches_dict[match]) for match in selected_matches]
     
     def fitness(individual):
-        if len(individual) == 0: return 0
-        total_odd = np.prod([opp['COTE'] for opp in individual])
+        if not individual: return 0
         total_prob = np.prod([opp['PROBA'] for opp in individual])
-        return total_odd if total_prob >= seuil_survie else 0
-    
-    def crossover(parent1, parent2):
-        if not parent1 or not parent2: return parent1 or parent2
-        matches1 = set([opp['MATCH'] for opp in parent1])
-        matches2 = set([opp['MATCH'] for opp in parent2])
-        all_m = list(matches1.union(matches2))
-        random.shuffle(all_m)
-        child = []
-        for m in all_m[:max_legs]:
-            source = random.choice([parent1, parent2])
-            opp = next((o for o in source if o['MATCH'] == m), None)
-            if not opp: # Fallback if not in chosen parent
-                opp = next((o for o in (parent1 if source==parent2 else parent2) if o['MATCH'] == m), None)
-            if opp: child.append(opp)
-        return child
-    
-    def mutate(individual, mutation_rate=0.2):
-        if not individual or random.random() > mutation_rate: return individual
-        if random.random() < 0.5:
-            idx = random.randint(0, len(individual)-1)
-            individual[idx] = random.choice(matches_dict[individual[idx]['MATCH']])
-        return individual
+        # LOGIQUE : Si le ticket survit au risque, sa valeur est sa COTE TOTALE
+        if total_prob >= seuil_survie:
+            return np.prod([opp['COTE'] for opp in individual])
+        return 0 # Sinon, éliminé
 
     population = [create_individual() for _ in range(population_size)]
     best_ind, best_fit = None, 0
@@ -167,10 +147,23 @@ def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=100, p
         if scores[0][1] > best_fit:
             best_fit = scores[0][1]
             best_ind = scores[0][0].copy()
-        selected = [ind for ind, _ in scores[:population_size // 2]]
+        selected = [ind for ind, _ in scores[:population_size // 2] if _ > 0]
+        if not selected: selected = [create_individual() for _ in range(population_size // 2)]
         new_pop = selected.copy()
         while len(new_pop) < population_size:
-            child = mutate(crossover(random.choice(selected), random.choice(selected)))
+            p1, p2 = random.choice(selected), random.choice(selected)
+            # Croisement
+            m1, m2 = set([o['MATCH'] for o in p1]), set([o['MATCH'] for o in p2])
+            all_m = list(m1.union(m2))
+            child = []
+            for m in random.sample(all_m, min(len(all_m), max_legs)):
+                source = p1 if m in m1 else p2
+                opp = next((o for o in source if o['MATCH'] == m), None)
+                if opp: child.append(opp)
+            # Mutation
+            if random.random() < 0.2 and child:
+                idx = random.randint(0, len(child)-1)
+                child[idx] = random.choice(matches_dict[child[idx]['MATCH']])
             new_pop.append(child)
         population = new_pop
     return best_ind if best_ind else []
@@ -217,13 +210,13 @@ with tab1:
         st.markdown("### 📋 VERDICT ALGORITHME")
         found = False
         for name, cote, prob in bets:
-            if cote > 1.0 and prob >= cfg['p'] and (cote * prob) >= cfg['ev']:
-                st.success(f"✅ **CONSEILLÉ : {name}** | Cote: @{cote} | Confiance: {prob*100:.1f}% | Mise: {bankroll*cfg['kelly']:.2f}€")
+            if cote > 1.0 and prob >= cfg['p']:
+                st.success(f"✅ **DÉTECTÉ : {name}** | Cote: @{cote} | Confiance: {prob*100:.1f}% | Mise: {bankroll*cfg['kelly']:.2f}€")
                 found = True
         if not found: st.warning("⚠️ AUCUN PARI NE CORRESPOND À VOS CRITÈRES.")
 
 with tab2:
-    st.subheader("🎯 GÉNÉRATEUR DE TICKETS - MAX GAIN OPTIMISÉ")
+    st.subheader("🎯 GÉNÉRATEUR DE TICKETS - MAX COTE OPTIMISÉ")
     gc1, gc2, gc3, gc4 = st.columns(4)
     l_scan = gc1.selectbox("CHAMPIONNAT", ["TOUTES LES LEAGUES"] + list(LEAGUES_DICT.keys()), key="l_scan")
     d_range = gc2.date_input("PÉRIODE", [datetime.now(), datetime.now()], key="d_scan_range")
@@ -233,7 +226,7 @@ with tab2:
     selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"], key="mkt_scan")
     risk_mode = st.select_slider("RISQUE (SEUIL SURVIE)", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID", key="rk_scan")
     risk_cfg = RISK_LEVELS[risk_mode]
-    if st.button("GÉNÉRER LE TICKET PARFAIT (MAX GAIN)", key="btn_gen"):
+    if st.button("GÉNÉRER LE TICKET PARFAIT (MAX COTE)", key="btn_gen"):
         if not isinstance(d_range, (list, tuple)) or len(d_range) < 2: st.stop()
         date_list = pd.date_range(start=d_range[0], end=d_range[1]).tolist()
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
@@ -258,21 +251,21 @@ with tab2:
                         odds_res = get_api("odds", {"fixture": f['fixture']['id']})
                         if odds_res:
                             for lbl, p, m_n, m_v in tests:
-                                if p >= 0.30:
-                                    for bet in odds_res[0]['bookmakers'][0]['bets']:
-                                        if bet['name'] == m_n:
-                                            for val in bet['values']:
-                                                if val['value'] == m_v:
-                                                    all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": float(val['odd']), "PROBA": p, "EV": float(val['odd']) * p})
+                                for bet in odds_res[0]['bookmakers'][0]['bets']:
+                                    if bet['name'] == m_n:
+                                        for val in bet['values']:
+                                            if val['value'] == m_v:
+                                                all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": float(val['odd']), "PROBA": p})
             progress_bar.progress((idx_d + 1) / len(date_list))
+        # Optimisation Max Cote selon survie
         final_selection = optimize_ticket_genetic(all_opps, max_legs, risk_cfg['p'], generations=150, population_size=60)
         if final_selection:
             total_odd = np.prod([x['COTE'] for x in final_selection])
             pdv = np.prod([x['PROBA'] for x in final_selection])
-            st.markdown(f"<div class='verdict-box'><h2>🔥 TICKET MAX GAIN (OPTIMISÉ)</h2><p>Survie : <b>{pdv*100:.1f}%</b> | Cote : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='verdict-box'><h2>🔥 TICKET MAX COTE (OPTIMISÉ)</h2><p>Survie : <b>{pdv*100:.1f}%</b> (Seuil: {risk_cfg['p']*100:.0f}%)</p><p>Cote : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p></div>", unsafe_allow_html=True)
             st.table(pd.DataFrame(final_selection)[["MATCH", "PARI", "COTE", "PROBA"]])
             send_to_discord(final_selection, total_odd, risk_mode)
-        else: st.error("⚠️ Aucun ticket trouvé.")
+        else: st.error("⚠️ Impossible de construire un ticket respectant ce seuil de survie.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
