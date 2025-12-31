@@ -7,7 +7,7 @@ import pandas as pd
 import time
 import random
 
-# --- CONFIGURATION CLEMENTRNXX PREDICTOR V5.5 ---
+# --- CONFIGURATION CLEMENTRNXX PREDICTOR V9.5 ---
 st.set_page_config(page_title="Clementrnxx Predictor V9.5", layout="wide")
 
 st.markdown("""
@@ -64,20 +64,35 @@ def get_api(endpoint, params):
     except: return []
 
 def get_team_stats(team_id, league_id, scope_overall):
+    # --- CALCUL DYNAMIQUE AVANTAGE DOMICILE/EXTERIEUR ---
+    l_stats = get_api("standings", {"league": league_id, "season": SEASON})
+    h_bias, a_bias = 1.08, 0.92 # Fallback
+    if l_stats:
+        try:
+            stds = l_stats[0]['league']['standings'][0]
+            total_h = sum(t['home']['goals']['for'] for t in stds)
+            total_a = sum(t['away']['goals']['for'] for t in stds)
+            total_m = sum(t['all']['played'] for t in stds)
+            if total_m > 0:
+                avg_gl = (total_h + total_a) / total_m
+                h_bias = (total_h / (total_m / 2)) / avg_gl
+                a_bias = (total_a / (total_m / 2)) / avg_gl
+        except: pass
+
     params = {"team": team_id, "season": SEASON, "last": 15}
     if not scope_overall: params["league"] = league_id
     f = get_api("fixtures", params)
-    if not f: return 1.2, 1.2
+    if not f: return 1.2, 1.2, h_bias, a_bias
     scored, conceded = [], []
     for m in f:
         if m['goals']['home'] is not None:
             is_home = m['teams']['home']['id'] == team_id
             scored.append(m['goals']['home'] if is_home else m['goals']['away'])
             conceded.append(m['goals']['away'] if is_home else m['goals']['home'])
-    if not scored: return 1.2, 1.2
+    if not scored: return 1.2, 1.2, h_bias, a_bias
     weights = [0.95 ** i for i in range(len(scored))]
     sum_w = sum(weights)
-    return sum(s * w for s, w in zip(scored, weights)) / sum_w, sum(c * w for c, w in zip(conceded, weights)) / sum_w
+    return sum(s * w for s, w in zip(scored, weights)) / sum_w, sum(c * w for c, w in zip(conceded, weights)) / sum_w, h_bias, a_bias
 
 def calculate_perfect_probs(lh, la):
     rho = -0.11
@@ -102,140 +117,63 @@ def send_to_discord(ticket, total_odd, mode):
 
 # --- ALGORITHME GÉNÉTIQUE POUR OPTIMISATION TICKET ---
 def optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=100, population_size=50):
-    """
-    Optimise le ticket via algorithme génétique pour maximiser la cote totale
-    tout en respectant le seuil de survie
-    """
-    if len(all_opps) == 0:
-        return []
-    
-    # Grouper les paris par match pour éviter les doublons
+    if len(all_opps) == 0: return []
     matches_dict = {}
     for opp in all_opps:
         match_id = opp['MATCH']
-        if match_id not in matches_dict:
-            matches_dict[match_id] = []
+        if match_id not in matches_dict: matches_dict[match_id] = []
         matches_dict[match_id].append(opp)
-    
     available_matches = list(matches_dict.keys())
-    
-    if len(available_matches) == 0:
-        return []
+    if len(available_matches) == 0: return []
     
     def create_individual():
-        """Crée un individu (ticket) aléatoire"""
         n_matches = min(random.randint(1, max_legs), len(available_matches))
         selected_matches = random.sample(available_matches, n_matches)
-        individual = []
-        for match in selected_matches:
-            # Choisir un pari aléatoire pour ce match
-            individual.append(random.choice(matches_dict[match]))
-        return individual
+        return [random.choice(matches_dict[match]) for match in selected_matches]
     
     def fitness(individual):
-        """
-        Fonction de fitness : retourne la cote totale si survie OK, sinon 0
-        """
-        if len(individual) == 0:
-            return 0
-        
+        if len(individual) == 0: return 0
         total_odd = np.prod([opp['COTE'] for opp in individual])
         total_prob = np.prod([opp['PROBA'] for opp in individual])
-        
-        # Si le ticket ne respecte pas le seuil de survie, fitness = 0
-        if total_prob < seuil_survie:
-            return 0
-        
-        return total_odd
+        return total_odd if total_prob >= seuil_survie else 0
     
     def crossover(parent1, parent2):
-        """Croisement entre deux parents"""
-        if len(parent1) == 0 or len(parent2) == 0:
-            return parent1 if len(parent1) > 0 else parent2
-        
-        # Prendre des matchs de chaque parent sans dépasser max_legs
+        if not parent1 or not parent2: return parent1 or parent2
         matches1 = set([opp['MATCH'] for opp in parent1])
         matches2 = set([opp['MATCH'] for opp in parent2])
-        
-        # Combiner les matchs uniques
-        all_matches = list(matches1.union(matches2))
-        random.shuffle(all_matches)
-        
+        all_m = list(matches1.union(matches2))
+        random.shuffle(all_m)
         child = []
-        for match in all_matches[:max_legs]:
-            # Choisir le pari de parent1 ou parent2 ou un nouveau
-            if match in matches1 and match in matches2:
-                source = random.choice([parent1, parent2])
-            elif match in matches1:
-                source = parent1
-            else:
-                source = parent2
-            
-            opp = next((o for o in source if o['MATCH'] == match), None)
-            if opp:
-                child.append(opp)
-        
+        for m in all_m[:max_legs]:
+            source = random.choice([parent1, parent2])
+            opp = next((o for o in source if o['MATCH'] == m), None)
+            if not opp: # Fallback if not in chosen parent
+                opp = next((o for o in (parent1 if source==parent2 else parent2) if o['MATCH'] == m), None)
+            if opp: child.append(opp)
         return child
     
     def mutate(individual, mutation_rate=0.2):
-        """Mutation : remplacer un pari aléatoire"""
-        if len(individual) == 0 or random.random() > mutation_rate:
-            return individual
-        
-        # Remplacer un pari aléatoire
-        if random.random() < 0.5 and len(individual) > 0:
-            # Changer le pari d'un match existant
-            idx = random.randint(0, len(individual) - 1)
-            match = individual[idx]['MATCH']
-            individual[idx] = random.choice(matches_dict[match])
-        else:
-            # Ajouter ou retirer un match
-            if len(individual) < max_legs and len(available_matches) > len(individual):
-                # Ajouter un nouveau match
-                current_matches = set([opp['MATCH'] for opp in individual])
-                available = [m for m in available_matches if m not in current_matches]
-                if available:
-                    new_match = random.choice(available)
-                    individual.append(random.choice(matches_dict[new_match]))
-            elif len(individual) > 1:
-                # Retirer un match
-                individual.pop(random.randint(0, len(individual) - 1))
-        
+        if not individual or random.random() > mutation_rate: return individual
+        if random.random() < 0.5:
+            idx = random.randint(0, len(individual)-1)
+            individual[idx] = random.choice(matches_dict[individual[idx]['MATCH']])
         return individual
-    
-    # Initialiser la population
+
     population = [create_individual() for _ in range(population_size)]
-    
-    best_individual = None
-    best_fitness = 0
-    
-    # Évolution
+    best_ind, best_fit = None, 0
     for generation in range(generations):
-        # Évaluer la fitness
-        fitness_scores = [(ind, fitness(ind)) for ind in population]
-        fitness_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # Garder le meilleur
-        if fitness_scores[0][1] > best_fitness:
-            best_fitness = fitness_scores[0][1]
-            best_individual = fitness_scores[0][0].copy()
-        
-        # Sélection : garder les 50% meilleurs
-        selected = [ind for ind, _ in fitness_scores[:population_size // 2]]
-        
-        # Créer la nouvelle génération
-        new_population = selected.copy()
-        
-        while len(new_population) < population_size:
-            parent1 = random.choice(selected)
-            parent2 = random.choice(selected)
-            child = crossover(parent1, parent2)
-            child = mutate(child)
-            new_population.append(child)
-        
-        population = new_population
-    
-    return best_individual if best_individual else []
+        scores = [(ind, fitness(ind)) for ind in population]
+        scores.sort(key=lambda x: x[1], reverse=True)
+        if scores[0][1] > best_fit:
+            best_fit = scores[0][1]
+            best_ind = scores[0][0].copy()
+        selected = [ind for ind, _ in scores[:population_size // 2]]
+        new_pop = selected.copy()
+        while len(new_pop) < population_size:
+            child = mutate(crossover(random.choice(selected), random.choice(selected)))
+            new_pop.append(child)
+        population = new_pop
+    return best_ind if best_ind else []
 
 # --- NAVIGATION ---
 st.title("⚡ CLEMENTRNXX PREDICTOR V9.5")
@@ -246,15 +184,14 @@ with tab1:
     scope_1v1 = st.select_slider("MODE DATA SOURCE", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="s_1v1")
     teams_res = get_api("teams", {"league": LEAGUES_DICT[l_name], "season": SEASON})
     teams = {t['team']['name']: t['team']['id'] for t in teams_res}
-    
     if teams:
         c1, c2 = st.columns(2)
         team_h = c1.selectbox("DOMICILE", sorted(teams.keys()), key="th_1v1")
         team_a = c2.selectbox("EXTÉRIEUR", sorted(teams.keys()), key="ta_1v1")
         if st.button("LANCER L'ANALYSE", key="btn_1v1"):
-            att_h, def_h = get_team_stats(teams[team_h], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
-            att_a, def_a = get_team_stats(teams[team_a], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
-            lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
+            att_h, def_h, h_bias, _ = get_team_stats(teams[team_h], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+            att_a, def_a, _, a_bias = get_team_stats(teams[team_a], LEAGUES_DICT[l_name], scope_1v1=="OVER-ALL")
+            lh, la = (att_h * def_a) ** 0.5 * h_bias, (att_a * def_h) ** 0.5 * a_bias
             st.session_state.v5_final = {"res": calculate_perfect_probs(lh, la), "th": team_h, "ta": team_a}
 
     if 'v5_final' in st.session_state:
@@ -265,27 +202,18 @@ with tab1:
         m3.metric(ta, f"{r['p_a']*100:.1f}%")
         m4.metric("BTTS OUI", f"{r['p_btts']*100:.1f}%")
         m5.metric("BTTS NON", f"{r['p_nobtts']*100:.1f}%")
-
         st.subheader("💰 MODULE BET")
         bc1, bc2 = st.columns([2, 1])
         with bc2:
-            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, step=10.0, key="bk_1v1")
+            bankroll = st.number_input("FOND DISPONIBLE (€)", value=100.0, key="bk_1v1")
             risk_1v1 = st.selectbox("MODE DE RISQUE", list(RISK_LEVELS.keys()), index=2, key="rm_1v1")
-        
         with bc1:
             i1, i2, i3, i4 = st.columns(4)
-            c_h = i1.number_input(f"Cote {th}", value=1.0, key="v_h")
-            c_hn = i2.number_input(f"{th}/N", value=1.0, key="v_hn")
-            c_n2 = i3.number_input(f"N/{ta}", value=1.0, key="v_n2")
-            c_a = i4.number_input(f"Cote {ta}", value=1.0, key="v_a")
+            c_h, c_hn, c_n2, c_a = i1.number_input(f"Cote {th}", 1.0), i2.number_input(f"{th}/N", 1.0), i3.number_input(f"N/{ta}", 1.0), i4.number_input(f"Cote {ta}", 1.0)
             i5, i6, i7 = st.columns(3)
-            c_12 = i5.number_input(f"{th}/{ta}", value=1.0, key="v_12")
-            c_by = i6.number_input("BTTS OUI", value=1.0, key="v_by")
-            c_bn = i7.number_input("BTTS NON", value=1.0, key="v_bn")
-
+            c_12, c_by, c_bn = i5.number_input(f"{th}/{ta}", 1.0), i6.number_input("BTTS OUI", 1.0), i7.number_input("BTTS NON", 1.0)
         cfg = RISK_LEVELS[risk_1v1]
         bets = [(f"Victoire {th}", c_h, r['p_h']), (f"Double Chance {th}/N", c_hn, r['p_1n']), (f"Double Chance N/{ta}", c_n2, r['p_n2']), (f"Victoire {ta}", c_a, r['p_a']), (f"Issue {th}/{ta}", c_12, r['p_12']), ("BTTS OUI", c_by, r['p_btts']), ("BTTS NON", c_bn, r['p_nobtts'])]
-        
         st.markdown("### 📋 VERDICT ALGORITHME")
         found = False
         for name, cote, prob in bets:
@@ -301,75 +229,50 @@ with tab2:
     d_range = gc2.date_input("PÉRIODE", [datetime.now(), datetime.now()], key="d_scan_range")
     bank_scan = gc3.number_input("FOND DISPONIBLE (€) ", value=100.0, key="b_scan_input")
     max_legs = gc4.slider("NB MATCHS MAX", 1, 30, 3, key="m_legs_scan")
-    
     scope_scan = st.select_slider("DATA SCAN", options=["LEAGUE ONLY", "OVER-ALL"], value="OVER-ALL", key="sc_scan")
     selected_markets = st.multiselect("MARCHÉS", ["ISSUE SIMPLE", "DOUBLE CHANCE", "BTTS (OUI/NON)"], default=["ISSUE SIMPLE", "DOUBLE CHANCE"], key="mkt_scan")
     risk_mode = st.select_slider("RISQUE (SEUIL SURVIE)", options=["SAFE", "MID-SAFE", "MID", "MID-AGGRESSIF", "AGGRESSIF"], value="MID", key="rk_scan")
     risk_cfg = RISK_LEVELS[risk_mode]
-    
     if st.button("GÉNÉRER LE TICKET PARFAIT (MAX GAIN)", key="btn_gen"):
         if not isinstance(d_range, (list, tuple)) or len(d_range) < 2: st.stop()
-        
         date_list = pd.date_range(start=d_range[0], end=d_range[1]).tolist()
         lids = LEAGUES_DICT.values() if l_scan == "TOUTES LES LEAGUES" else [LEAGUES_DICT[l_scan]]
         all_opps = []
         progress_bar = st.progress(0)
-        
         for idx_d, current_date in enumerate(date_list):
             date_str = current_date.strftime('%Y-%m-%d')
             for lid in lids:
                 fixtures = get_api("fixtures", {"league": lid, "season": SEASON, "date": date_str})
                 for f in fixtures:
                     if f['fixture']['status']['short'] != "NS": continue
-                    att_h, def_h = get_team_stats(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL")
-                    att_a, def_a = get_team_stats(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL")
-                    lh, la = (att_h * def_a) ** 0.5 * 1.08, (att_a * def_h) ** 0.5 * 0.92
+                    att_h, def_h, h_bias, _ = get_team_stats(f['teams']['home']['id'], lid, scope_scan=="OVER-ALL")
+                    att_a, def_a, _, a_bias = get_team_stats(f['teams']['away']['id'], lid, scope_scan=="OVER-ALL")
+                    lh, la = (att_h * def_a) ** 0.5 * h_bias, (att_a * def_h) ** 0.5 * a_bias
                     pr = calculate_perfect_probs(lh, la)
                     h_n, a_n = f['teams']['home']['name'], f['teams']['away']['name']
-
                     tests = []
-                    if "ISSUE SIMPLE" in selected_markets:
-                        tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
-                    if "DOUBLE CHANCE" in selected_markets:
-                        tests += [(f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away")]
-                    if "BTTS (OUI/NON)" in selected_markets:
-                        tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
-
+                    if "ISSUE SIMPLE" in selected_markets: tests += [(h_n, pr['p_h'], "Match Winner", "Home"), (a_n, pr['p_a'], "Match Winner", "Away")]
+                    if "DOUBLE CHANCE" in selected_markets: tests += [(f"{h_n}/N", pr['p_1n'], "Double Chance", "Home/Draw"), (f"N/{a_n}", pr['p_n2'], "Double Chance", "Draw/Away")]
+                    if "BTTS (OUI/NON)" in selected_markets: tests += [("BTTS OUI", pr['p_btts'], "Both Teams Score", "Yes"), ("BTTS NON", pr['p_nobtts'], "Both Teams Score", "No")]
                     if tests:
                         odds_res = get_api("odds", {"fixture": f['fixture']['id']})
                         if odds_res:
                             for lbl, p, m_n, m_v in tests:
-                                if p >= 0.30:  # Seuil minimum de probabilité
+                                if p >= 0.30:
                                     for bet in odds_res[0]['bookmakers'][0]['bets']:
                                         if bet['name'] == m_n:
                                             for val in bet['values']:
                                                 if val['value'] == m_v:
-                                                    cote = float(val['odd'])
-                                                    all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": cote, "PROBA": p, "EV": cote * p})
+                                                    all_opps.append({"MATCH": f"{h_n} - {a_n}", "PARI": lbl, "COTE": float(val['odd']), "PROBA": p, "EV": float(val['odd']) * p})
             progress_bar.progress((idx_d + 1) / len(date_list))
-
-        # --- OPTIMISATION GÉNÉTIQUE ---
-        seuil_survie = risk_cfg['p']
-        
-        st.info(f"🧬 Optimisation génétique en cours... ({len(all_opps)} paris disponibles)")
-        final_selection = optimize_ticket_genetic(all_opps, max_legs, seuil_survie, generations=150, population_size=60)
-
+        final_selection = optimize_ticket_genetic(all_opps, max_legs, risk_cfg['p'], generations=150, population_size=60)
         if final_selection:
             total_odd = np.prod([x['COTE'] for x in final_selection])
             pdv = np.prod([x['PROBA'] for x in final_selection])
-            
-            st.markdown(f"""
-                <div class='verdict-box'>
-                    <h2>🔥 TICKET MAX GAIN (OPTIMISÉ)</h2>
-                    <p style='font-size:1.2rem;'>Survie Ticket : <b>{pdv*100:.1f}%</b> (Seuil: {seuil_survie*100:.0f}%)</p>
-                    <p>Cote Totale : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p>
-                    <p>Gain Potentiel : <b>{(bank_scan * risk_cfg['kelly'] * total_odd):.2f}€</b></p>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"<div class='verdict-box'><h2>🔥 TICKET MAX GAIN (OPTIMISÉ)</h2><p>Survie : <b>{pdv*100:.1f}%</b> | Cote : <b>@{total_odd:.2f}</b> | Mise : <b>{(bank_scan * risk_cfg['kelly']):.2f}€</b></p></div>", unsafe_allow_html=True)
             st.table(pd.DataFrame(final_selection)[["MATCH", "PARI", "COTE", "PROBA"]])
             send_to_discord(final_selection, total_odd, risk_mode)
-        else: 
-            st.error("⚠️ Impossible de construire un ticket respectant ce seuil de survie. Essayez un mode de risque plus agressif ou augmentez la période.")
+        else: st.error("⚠️ Aucun ticket trouvé.")
 
 with tab3:
     st.subheader("📊 CLASSEMENTS")
